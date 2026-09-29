@@ -43,6 +43,7 @@ fun AccountScreen(
     dashboardState: DashboardUiState,
     onUserAgentChange: (String) -> Unit,
     onManualRefreshSession: () -> Unit,
+    onToggleBatterySaver: (Boolean) -> Unit = {},
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -323,6 +324,76 @@ fun AccountScreen(
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Perbarui Token Sekarang (Refresh Token)", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Battery Saver Mode Section
+        item {
+            SectionHeader(title = "Efisiensi Daya & Penghemat Baterai", icon = Icons.Default.BatteryChargingFull)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = RcSurface),
+                border = BorderStroke(1.dp, if (dashboardState.isBatterySaverEnabled) RcGreen.copy(alpha = 0.5f) else RcSurfaceBorder)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Mode Hemat Baterai (Polling)",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = RcTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Mengurangi frekuensi polling data mining power saat aplikasi berada di latar belakang (dari 60s menjadi 180s) untuk efisiensi daya maksimal.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcTextSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked = dashboardState.isBatterySaverEnabled,
+                            onCheckedChange = onToggleBatterySaver,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = RcGreen
+                            ),
+                            modifier = Modifier.testTag("account_battery_saver_toggle")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = RcSurfaceBorder)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Status Aplikasi:", style = MaterialTheme.typography.labelSmall, color = RcTextSecondary)
+                            Text(
+                                text = if (dashboardState.isAppInForeground) "Di Depan (Foreground)" else "Latar Belakang (Background)",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (dashboardState.isAppInForeground) RcCyan else RcAmber
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Interval Polling Aktif:", style = MaterialTheme.typography.labelSmall, color = RcTextSecondary)
+                            Text(
+                                text = "${dashboardState.currentPollingIntervalSeconds} Detik",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (dashboardState.isBatterySaverEnabled) RcGreen else RcTextPrimary
+                            )
                         }
                     }
                 }

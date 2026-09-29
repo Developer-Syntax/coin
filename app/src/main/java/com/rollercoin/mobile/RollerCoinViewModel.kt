@@ -1,7 +1,9 @@
 package com.rollercoin.mobile
 
 import android.app.Application
+import android.content.Context
 import android.graphics.BitmapFactory
+import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.rollercoin.mobile.engine.BotEngine
@@ -49,6 +51,10 @@ data class DashboardUiState(
     val isLoading: Boolean = false,
     val dashboard: Dashboard? = null,
     val error: String? = null,
+    val lastPowerUpdateTime: Long = 0L,
+    val isBatterySaverEnabled: Boolean = true,
+    val isAppInForeground: Boolean = true,
+    val currentPollingIntervalSeconds: Int = 30,
 )
 
 data class ActiveGameUiState(
@@ -90,6 +96,28 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
     val isFloatingBubbleEnabled: StateFlow<Boolean> = BotEngine.isFloatingBubbleEnabled
     val isBackgroundServiceEnabled: StateFlow<Boolean> = BotEngine.isBackgroundServiceEnabled
 
+    private val _isBatterySaverEnabled = MutableStateFlow(true)
+    val isBatterySaverEnabled: StateFlow<Boolean> = _isBatterySaverEnabled.asStateFlow()
+
+    private val _isAppInForeground = MutableStateFlow(true)
+    val isAppInForeground: StateFlow<Boolean> = _isAppInForeground.asStateFlow()
+
+    private var powerPollingJob: Job? = null
+
+    companion object {
+        const val FOREGROUND_POLL_INTERVAL_SECONDS = 30
+        const val BACKGROUND_NORMAL_POLL_INTERVAL_SECONDS = 60
+        const val BACKGROUND_BATTERY_SAVER_POLL_INTERVAL_SECONDS = 180
+
+        fun calculateInterval(inForeground: Boolean, batterySaverEnabled: Boolean, systemPowerSave: Boolean = false): Int {
+            return when {
+                inForeground -> FOREGROUND_POLL_INTERVAL_SECONDS
+                batterySaverEnabled || systemPowerSave -> BACKGROUND_BATTERY_SAVER_POLL_INTERVAL_SECONDS
+                else -> BACKGROUND_NORMAL_POLL_INTERVAL_SECONDS
+            }
+        }
+    }
+
     private var otpRequest: OtpRequest? = null
 
     init {
@@ -105,6 +133,16 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                 val savedAccess = store.get("access")
                 val savedRefresh = store.get("refresh")
                 val savedDelay = store.getInt("botDelay", 5).coerceIn(3, 30)
+                val savedBatterySaver = store.getBoolean("batterySaver", true)
+
+                _isBatterySaverEnabled.value = savedBatterySaver
+                BotEngine.setBatterySaverEnabled(savedBatterySaver)
+                _dashboardUiState.update {
+                    it.copy(
+                        isBatterySaverEnabled = savedBatterySaver,
+                        currentPollingIntervalSeconds = calculatePowerPollingIntervalSeconds(),
+                    )
+                }
 
                 BotEngine.initialize(savedDelay)
 
@@ -559,8 +597,15 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 val snapshot = withContext(Dispatchers.IO) { repository.loadDashboard() }
                 _dashboardUiState.update {
-                    it.copy(isLoading = false, dashboard = snapshot, error = null)
+                    it.copy(
+                        isLoading = false,
+                        dashboard = snapshot,
+                        error = null,
+                        lastPowerUpdateTime = System.currentTimeMillis(),
+                        currentPollingIntervalSeconds = calculatePowerPollingIntervalSeconds(),
+                    )
                 }
+                startPowerPolling()
             } catch (e: Throwable) {
                 val isAuthErr = e.message?.contains("401") == true || e.message?.contains("token", ignoreCase = true) == true
                 if (isAuthErr && repository.hasRefreshToken()) {
@@ -577,8 +622,15 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                         }
                         if (retrySnapshot != null) {
                             _dashboardUiState.update {
-                                it.copy(isLoading = false, dashboard = retrySnapshot, error = null)
+                                it.copy(
+                                    isLoading = false,
+                                    dashboard = retrySnapshot,
+                                    error = null,
+                                    lastPowerUpdateTime = System.currentTimeMillis(),
+                                    currentPollingIntervalSeconds = calculatePowerPollingIntervalSeconds(),
+                                )
                             }
+                            startPowerPolling()
                             return@launch
                         }
                     }
@@ -587,6 +639,136 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                     it.copy(isLoading = false, error = "Gagal memuat dashboard: ${e.message}")
                 }
                 addLog("Error dashboard: ${e.message}", LogLevel.ERROR)
+            }
+        }
+    }
+
+    fun calculatePowerPollingIntervalSeconds(): Int {
+        val inForeground = _isAppInForeground.value
+        val batterySaver = _isBatterySaverEnabled.value
+        val powerManager = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isSystemPowerSave = powerManager?.isPowerSaveMode == true
+        return calculateInterval(inForeground, batterySaver, isSystemPowerSave)
+    }
+
+    fun setAppForeground(inForeground: Boolean) {
+        if (_isAppInForeground.value == inForeground) return
+        val wasBackground = !_isAppInForeground.value
+        _isAppInForeground.value = inForeground
+        val intervalSec = calculatePowerPollingIntervalSeconds()
+        _dashboardUiState.update {
+            it.copy(
+                isAppInForeground = inForeground,
+                currentPollingIntervalSeconds = intervalSec,
+            )
+        }
+        if (!inForeground && _isBatterySaverEnabled.value) {
+            addLog("Mode Hemat Baterai aktif: Polling mining power di latar belakang diperlambat (${intervalSec}s)", LogLevel.INFO)
+        } else if (inForeground) {
+            addLog("Aplikasi di depan: Polling mining power berjalan normal (${intervalSec}s)", LogLevel.INFO)
+            if (wasBackground) {
+                // Instantly refresh power upon returning to foreground
+                fetchMiningPowerOnce()
+            }
+        }
+        startPowerPolling()
+    }
+
+    fun fetchMiningPowerOnce() {
+        if (!_authUiState.value.isLoggedIn) return
+        viewModelScope.launch {
+            try {
+                if (repository.isTokenExpired() && repository.hasRefreshToken()) {
+                    val newTokens = withContext(Dispatchers.IO) {
+                        runCatching { repository.refreshAccessToken() }.getOrNull()
+                    }
+                    if (newTokens != null) {
+                        saveAuth(newTokens.accessToken, newTokens.refreshToken)
+                        _authUiState.update { it.copy(tokenExpiresAt = repository.tokenExpiresAt()) }
+                    }
+                }
+                val powerSnapshot = withContext(Dispatchers.IO) {
+                    repository.fetchPowerInfo()
+                }
+                if (powerSnapshot != null) {
+                    _dashboardUiState.update { current ->
+                        val updatedDashboard = current.dashboard?.copy(power = powerSnapshot)
+                        current.copy(
+                            dashboard = updatedDashboard,
+                            lastPowerUpdateTime = System.currentTimeMillis(),
+                        )
+                    }
+                }
+            } catch (e: Throwable) {
+                // Ignore transient network errors
+            }
+        }
+    }
+
+    fun toggleBatterySaver(enabled: Boolean) {
+        _isBatterySaverEnabled.value = enabled
+        store.putBoolean("batterySaver", enabled)
+        BotEngine.setBatterySaverEnabled(enabled)
+        val intervalSec = calculatePowerPollingIntervalSeconds()
+        _dashboardUiState.update {
+            it.copy(
+                isBatterySaverEnabled = enabled,
+                currentPollingIntervalSeconds = intervalSec,
+            )
+        }
+        addLog(
+            if (enabled) "Mode Hemat Baterai diaktifkan: Polling mining power di latar belakang dikurangi (${BACKGROUND_BATTERY_SAVER_POLL_INTERVAL_SECONDS}s)"
+            else "Mode Hemat Baterai dinonaktifkan: Polling background normal (${BACKGROUND_NORMAL_POLL_INTERVAL_SECONDS}s)",
+            LogLevel.INFO
+        )
+        startPowerPolling()
+    }
+
+    fun startPowerPolling() {
+        powerPollingJob?.cancel()
+        if (!_authUiState.value.isLoggedIn) return
+
+        powerPollingJob = viewModelScope.launch {
+            while (_authUiState.value.isLoggedIn) {
+                val intervalSec = calculatePowerPollingIntervalSeconds()
+                _dashboardUiState.update {
+                    it.copy(
+                        currentPollingIntervalSeconds = intervalSec,
+                        isBatterySaverEnabled = _isBatterySaverEnabled.value,
+                        isAppInForeground = _isAppInForeground.value,
+                    )
+                }
+                delay(intervalSec * 1000L)
+
+                if (!_authUiState.value.isLoggedIn) break
+
+                try {
+                    // Pre-check token expiration before polling
+                    if (repository.isTokenExpired() && repository.hasRefreshToken()) {
+                        val newTokens = withContext(Dispatchers.IO) {
+                            runCatching { repository.refreshAccessToken() }.getOrNull()
+                        }
+                        if (newTokens != null) {
+                            saveAuth(newTokens.accessToken, newTokens.refreshToken)
+                            _authUiState.update { it.copy(tokenExpiresAt = repository.tokenExpiresAt()) }
+                        }
+                    }
+
+                    val powerSnapshot = withContext(Dispatchers.IO) {
+                        repository.fetchPowerInfo()
+                    }
+                    if (powerSnapshot != null) {
+                        _dashboardUiState.update { current ->
+                            val updatedDashboard = current.dashboard?.copy(power = powerSnapshot)
+                            current.copy(
+                                dashboard = updatedDashboard,
+                                lastPowerUpdateTime = System.currentTimeMillis(),
+                            )
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // Periodic polling handles errors silently
+                }
             }
         }
     }
@@ -623,6 +805,8 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
 
     fun logout() {
         stopAutoBot()
+        powerPollingJob?.cancel()
+        powerPollingJob = null
         repository.disconnect()
         store.clear()
         _authUiState.value = AuthUiState()
@@ -633,6 +817,8 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
     override fun onCleared() {
         // Note: we don't automatically kill the bot on ViewModel clear if background service is enabled,
         // but if user logged out or explicitly stopped, it is stopped.
+        powerPollingJob?.cancel()
+        powerPollingJob = null
         repository.disconnect()
         super.onCleared()
     }

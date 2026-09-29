@@ -1,40 +1,42 @@
 package com.rollercoin.mobile.ui.screens
 
 import android.graphics.BitmapFactory
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rollercoin.mobile.AuthUiState
@@ -72,500 +74,732 @@ fun LoginScreen(
     var selectedMethod by remember { mutableStateOf(LoginMethod.EMAIL_OTP) }
     var showAdvancedSettings by remember { mutableStateOf(false) }
 
-    LazyColumn(
+    // Staggered screen entry animation
+    var isLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        isLoaded = true
+    }
+
+    val headerAlpha by animateFloatAsState(
+        targetValue = if (isLoaded) 1f else 0f,
+        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        label = "headerAlpha"
+    )
+    val headerY by animateFloatAsState(
+        targetValue = if (isLoaded) 0f else -30f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "headerY"
+    )
+
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (isLoaded) 1f else 0f,
+        animationSpec = tween(durationMillis = 650, delayMillis = 150, easing = FastOutSlowInEasing),
+        label = "cardAlpha"
+    )
+    val cardY by animateFloatAsState(
+        targetValue = if (isLoaded) 0f else 35f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow),
+        label = "cardY"
+    )
+
+    // Infinite Ambient & Hero Animations
+    val infiniteTransition = rememberInfiniteTransition(label = "loginAmbient")
+
+    // Ambient floating orbs
+    val orbOffset1 by infiniteTransition.animateFloat(
+        initialValue = -35f,
+        targetValue = 35f,
+        animationSpec = infiniteRepeatable(tween(5500, easing = EaseInOutQuad), RepeatMode.Reverse),
+        label = "orb1"
+    )
+    val orbOffset2 by infiniteTransition.animateFloat(
+        initialValue = 30f,
+        targetValue = -30f,
+        animationSpec = infiniteRepeatable(tween(6500, easing = EaseInOutQuad), RepeatMode.Reverse),
+        label = "orb2"
+    )
+    val ambientPulse by infiniteTransition.animateFloat(
+        initialValue = 0.12f,
+        targetValue = 0.28f,
+        animationSpec = infiniteRepeatable(tween(3800, easing = EaseInOutQuad), RepeatMode.Reverse),
+        label = "ambientPulse"
+    )
+
+    // Hero Logo floating and breathing
+    val logoFloatY by infiniteTransition.animateFloat(
+        initialValue = -6f,
+        targetValue = 6f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = EaseInOutQuad), RepeatMode.Reverse),
+        label = "logoFloat"
+    )
+    val logoPulseScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "logoPulse"
+    )
+    val haloRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(10000, easing = LinearEasing), RepeatMode.Restart),
+        label = "haloRotation"
+    )
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(RcDarkBackground)
-            .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(top = 32.dp, bottom = 48.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // App Header & Branding
-        item {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(RcAmber.copy(alpha = 0.3f), Color(0xFF1E293B))
-                            )
-                        )
-                        .border(
-                            BorderStroke(
-                                2.dp,
-                                Brush.linearGradient(listOf(RcAmber, RcCyan))
-                            ),
-                            RoundedCornerShape(22.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_rollercoin_logo),
-                        contentDescription = "RollerCoin Logo",
-                        modifier = Modifier.size(54.dp)
-                    )
-                }
+        // Dynamic Cyber Glow Mesh Background
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val width = size.width
+            val height = size.height
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Text(
-                    text = "ROLLERCOIN",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 2.sp
+            // Top-left Amber glow orb
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        RcAmber.copy(alpha = ambientPulse),
+                        RcAmber.copy(alpha = ambientPulse * 0.4f),
+                        Color.Transparent
                     ),
-                    color = RcAmber
-                )
+                    center = Offset(width * 0.25f + orbOffset1, height * 0.15f + orbOffset2),
+                    radius = width * 0.55f
+                ),
+                radius = width * 0.55f,
+                center = Offset(width * 0.25f + orbOffset1, height * 0.15f + orbOffset2)
+            )
 
-                Text(
-                    text = "Mobile Companion & Mining Automation",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = RcTextSecondary,
-                    textAlign = TextAlign.Center
-                )
-            }
+            // Bottom-right Cyan tech glow orb
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        RcCyan.copy(alpha = ambientPulse * 0.85f),
+                        RcCyan.copy(alpha = ambientPulse * 0.3f),
+                        Color.Transparent
+                    ),
+                    center = Offset(width * 0.8f + orbOffset2, height * 0.75f + orbOffset1),
+                    radius = width * 0.65f
+                ),
+                radius = width * 0.65f,
+                center = Offset(width * 0.8f + orbOffset2, height * 0.75f + orbOffset1)
+            )
         }
 
-        // Checking saved session banner
-        if (authState.isCheckingSavedSession) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp),
+            contentPadding = PaddingValues(top = 32.dp, bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // App Header & Animated Branding
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = RcSurfaceElevated),
-                    border = BorderStroke(1.dp, RcCyan.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = RcCyan,
-                            strokeWidth = 2.5.dp
-                        )
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column {
-                            Text(
-                                text = "Memeriksa Sesi Lokal...",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = RcTextPrimary
-                            )
-                            Text(
-                                text = "Memvalidasi token & mencoba login otomatis...",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = RcTextSecondary
-                            )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .graphicsLayer {
+                            alpha = headerAlpha
+                            translationY = headerY
                         }
-                    }
-                }
-            }
-        }
-
-        // Info message
-        if (authState.message != null) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = RcGreen.copy(alpha = 0.15f)),
-                    border = BorderStroke(1.dp, RcGreen.copy(alpha = 0.4f))
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .offset(y = logoFloatY.dp)
+                            .scale(logoPulseScale),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = RcGreen,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = authState.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RcGreenLight
-                        )
-                    }
-                }
-            }
-        }
-
-        // Error message
-        if (authState.error != null) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = RcRed.copy(alpha = 0.15f)),
-                    border = BorderStroke(1.dp, RcRed.copy(alpha = 0.4f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ErrorOutline,
-                            contentDescription = null,
-                            tint = RcRed,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = authState.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RcRed
-                        )
-                    }
-                }
-            }
-        }
-
-        // Login Card with Tabs
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = RcSurface),
-                border = BorderStroke(1.dp, RcSurfaceBorder)
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    // Method Selector Tabs
-                    TabRow(
-                        selectedTabIndex = selectedMethod.ordinal,
-                        containerColor = RcSurfaceElevated,
-                        contentColor = RcAmber,
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                    ) {
-                        Tab(
-                            selected = selectedMethod == LoginMethod.EMAIL_OTP,
-                            onClick = { selectedMethod = LoginMethod.EMAIL_OTP },
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Email,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Email & OTP", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
-                        )
-                        Tab(
-                            selected = selectedMethod == LoginMethod.DIRECT_TOKEN,
-                            onClick = { selectedMethod = LoginMethod.DIRECT_TOKEN },
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Key,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Direct Token", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    if (selectedMethod == LoginMethod.EMAIL_OTP) {
-                        // Email field
-                        OutlinedTextField(
-                            value = authState.email,
-                            onValueChange = onEmailChange,
-                            label = { Text("Email RollerCoin") },
-                            placeholder = { Text("nama@email.com") },
-                            leadingIcon = {
-                                Icon(Icons.Default.Email, contentDescription = null, tint = RcAmber)
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
+                        // Rotating glowing neon halo behind the logo badge
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("email_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = RcSurfaceElevated,
-                                unfocusedContainerColor = RcSurfaceElevated,
-                                focusedBorderColor = RcAmber,
-                                unfocusedBorderColor = RcSurfaceBorder,
-                                focusedTextColor = RcTextPrimary,
-                                unfocusedTextColor = RcTextPrimary
-                            )
+                                .size(92.dp)
+                                .rotate(haloRotation)
+                                .clip(RoundedCornerShape(26.dp))
+                                .background(
+                                    Brush.sweepGradient(
+                                        listOf(
+                                            RcAmber,
+                                            Color.Transparent,
+                                            RcCyan,
+                                            Color.Transparent,
+                                            RcAmber
+                                        )
+                                    )
+                                )
                         )
 
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Interactive CAPTCHA challenge
-                        val challenge = authState.captchaChallenge
-                        if (challenge != null && challenge.image != null) {
-                            InteractiveCaptchaSolver(
-                                challenge = challenge,
-                                pointsList = authState.captchaPointList,
-                                manualPoints = authState.captchaPoints,
-                                onAddPoint = onAddCaptchaPoint,
-                                onRemoveLastPoint = onRemoveLastCaptchaPoint,
-                                onClearPoints = onClearCaptchaPoints,
-                                onAutoDetect = onAutoDetectCaptchaPoints,
-                                onManualPointsChange = onCaptchaPointsChange,
-                                onValidate = onValidateCaptcha,
-                                isBusy = authState.isBusy,
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                        }
-
-                        // CAPTCHA and OTP Action buttons
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = onPrepareCaptcha,
-                                enabled = !authState.isBusy,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("check_captcha_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                        // Main Logo Badge Box
+                        Box(
+                            modifier = Modifier
+                                .size(82.dp)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
+                                    )
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (challenge == null) "Siapkan CAPTCHA" else "Ganti CAPTCHA", fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = onRequestOtp,
-                                enabled = !authState.isBusy && authState.email.isNotBlank(),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = RcAmber,
-                                    contentColor = RcDarkBackground
+                                .border(
+                                    BorderStroke(
+                                        2.dp,
+                                        Brush.linearGradient(listOf(RcAmber, RcCyan))
+                                    ),
+                                    RoundedCornerShape(22.dp)
                                 ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("request_otp_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Kirim OTP", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        HorizontalDivider(color = RcSurfaceBorder)
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // OTP Code Input
-                        OutlinedTextField(
-                            value = authState.otpCode,
-                            onValueChange = onOtpChange,
-                            label = { Text("Kode OTP dari Email") },
-                            placeholder = { Text("Masukkan 6 digit angka") },
-                            leadingIcon = {
-                                Icon(Icons.Default.Password, contentDescription = null, tint = RcGreen)
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("otp_code_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = RcSurfaceElevated,
-                                unfocusedContainerColor = RcSurfaceElevated,
-                                focusedBorderColor = RcGreen,
-                                unfocusedBorderColor = RcSurfaceBorder,
-                                focusedTextColor = RcTextPrimary,
-                                unfocusedTextColor = RcTextPrimary
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        Button(
-                            onClick = onValidateOtp,
-                            enabled = !authState.isBusy && authState.otpCode.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = RcGreen,
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .testTag("validate_otp_button")
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (authState.isBusy) {
-                                CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White)
-                            } else {
-                                Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Konfirmasi OTP & Masuk", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            }
-                        }
-                    } else {
-                        // Direct Token flow
-                        Text(
-                            text = "Tempel token dari DevTools RollerCoin untuk login langsung:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RcTextSecondary
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        OutlinedTextField(
-                            value = authState.manualToken,
-                            onValueChange = onManualTokenChange,
-                            label = { Text("Bearer Access Token (Wajib)") },
-                            placeholder = { Text("eyJhbGciOi...") },
-                            maxLines = 3,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("manual_token_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = RcSurfaceElevated,
-                                unfocusedContainerColor = RcSurfaceElevated,
-                                focusedBorderColor = RcAmber,
-                                unfocusedBorderColor = RcSurfaceBorder,
-                                focusedTextColor = RcTextPrimary,
-                                unfocusedTextColor = RcTextPrimary
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Refresh Token Input (Disimpan ke lokal untuk auto-renew saat expired!)
-                        OutlinedTextField(
-                            value = authState.manualRefreshToken,
-                            onValueChange = onManualRefreshTokenChange,
-                            label = { Text("Refresh Token (Disarankan untuk Auto-Renew)") },
-                            placeholder = { Text("Refresh token dari inspect storage...") },
-                            maxLines = 2,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("manual_refresh_token_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = RcSurfaceElevated,
-                                unfocusedContainerColor = RcSurfaceElevated,
-                                focusedBorderColor = RcCyan,
-                                unfocusedBorderColor = RcSurfaceBorder,
-                                focusedTextColor = RcTextPrimary,
-                                unfocusedTextColor = RcTextPrimary
-                            )
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "ℹ Token dan Refresh Token disimpan aman di lokal. Jika token kedaluwarsa, aplikasi akan memperbarui token baru secara otomatis.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = RcCyan
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = onDirectTokenLogin,
-                            enabled = !authState.isBusy && authState.manualToken.isNotBlank(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = RcAmber,
-                                contentColor = RcDarkBackground
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .testTag("direct_token_login_button")
-                        ) {
-                            Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sambungkan & Masuk", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Advanced Settings Toggle
-                    TextButton(
-                        onClick = { showAdvancedSettings = !showAdvancedSettings },
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    ) {
-                        Icon(
-                            imageVector = if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = RcTextMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (showAdvancedSettings) "Sembunyikan Pengaturan User-Agent" else "Pengaturan Lanjutan (User-Agent)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = RcTextMuted
-                        )
-                    }
-
-                    AnimatedVisibility(visible = showAdvancedSettings) {
-                        Column(modifier = Modifier.padding(top = 8.dp)) {
-                            OutlinedTextField(
-                                value = authState.userAgent,
-                                onValueChange = onUserAgentChange,
-                                label = { Text("Custom User-Agent") },
-                                maxLines = 2,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = RcSurfaceElevated,
-                                    unfocusedContainerColor = RcSurfaceElevated,
-                                    focusedBorderColor = RcAmber,
-                                    unfocusedBorderColor = RcSurfaceBorder,
-                                    focusedTextColor = RcTextPrimary,
-                                    unfocusedTextColor = RcTextPrimary
-                                )
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_rollercoin_logo),
+                                contentDescription = "RollerCoin Logo",
+                                modifier = Modifier.size(54.dp)
                             )
                         }
                     }
-                }
-            }
-        }
 
-        // Feature highlights footer
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = BorderStroke(1.dp, RcSurfaceBorder)
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     Text(
-                        text = "Fitur RollerCoin Mobile:",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        text = "ROLLERCOIN",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 2.sp
+                        ),
                         color = RcAmber
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
-                        text = "• Monitoring Hashpower & Mining Room Realtime\n• Auto-Play Bot 15 Mini-Games dengan smart cooldown\n• Enkripsi token & penyimpanan aman Android Keystore",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "Mobile Companion & Mining Automation",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = RcTextSecondary,
-                        lineHeight = 18.sp
+                        textAlign = TextAlign.Center
                     )
+                }
+            }
+
+            // Checking saved session banner with smooth animation
+            item {
+                AnimatedVisibility(
+                    visible = authState.isCheckingSavedSession,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = RcSurfaceElevated),
+                        border = BorderStroke(1.dp, RcCyan.copy(alpha = 0.5f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = RcCyan,
+                                strokeWidth = 2.5.dp
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = "Memeriksa Sesi Lokal...",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = RcTextPrimary
+                                )
+                                Text(
+                                    text = "Memvalidasi token & mencoba login otomatis...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = RcTextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Info message banner with animation
+            item {
+                AnimatedVisibility(
+                    visible = authState.message != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = RcGreen.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, RcGreen.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = RcGreen,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = authState.message.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcGreenLight
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Error message banner with animation
+            item {
+                AnimatedVisibility(
+                    visible = authState.error != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = RcRed.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, RcRed.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = RcRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = authState.error.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcRed
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Main Interactive Login Card
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            alpha = cardAlpha
+                            translationY = cardY
+                        },
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = RcSurface),
+                    border = BorderStroke(1.2.dp, RcSurfaceBorder)
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
+                        // Method Selector Tabs with Smooth Sliding Indicator
+                        TabRow(
+                            selectedTabIndex = selectedMethod.ordinal,
+                            containerColor = RcSurfaceElevated,
+                            contentColor = RcAmber,
+                            indicator = { tabPositions ->
+                                TabRowDefaults.SecondaryIndicator(
+                                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedMethod.ordinal]),
+                                    color = RcAmber,
+                                    height = 3.dp
+                                )
+                            },
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Tab(
+                                selected = selectedMethod == LoginMethod.EMAIL_OTP,
+                                onClick = { selectedMethod = LoginMethod.EMAIL_OTP },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Email,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Email & OTP", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                }
+                            )
+                            Tab(
+                                selected = selectedMethod == LoginMethod.DIRECT_TOKEN,
+                                onClick = { selectedMethod = LoginMethod.DIRECT_TOKEN },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Key,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Direct Token", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Animated Content Transition between Login Methods
+                        AnimatedContent(
+                            targetState = selectedMethod,
+                            transitionSpec = {
+                                if (targetState == LoginMethod.DIRECT_TOKEN) {
+                                    (slideInHorizontally(
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                        initialOffsetX = { it / 3 }
+                                    ) + fadeIn(tween(250))) togetherWith
+                                        (slideOutHorizontally(
+                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            targetOffsetX = { -it / 3 }
+                                        ) + fadeOut(tween(200)))
+                                } else {
+                                    (slideInHorizontally(
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                        initialOffsetX = { -it / 3 }
+                                    ) + fadeIn(tween(250))) togetherWith
+                                        (slideOutHorizontally(
+                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            targetOffsetX = { it / 3 }
+                                        ) + fadeOut(tween(200)))
+                                }
+                            },
+                            label = "loginTabAnimatedContent"
+                        ) { method ->
+                            if (method == LoginMethod.EMAIL_OTP) {
+                                Column {
+                                    // Email field
+                                    OutlinedTextField(
+                                        value = authState.email,
+                                        onValueChange = onEmailChange,
+                                        label = { Text("Email RollerCoin") },
+                                        placeholder = { Text("nama@email.com") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Email, contentDescription = null, tint = RcAmber)
+                                        },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("email_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = RcSurfaceElevated,
+                                            unfocusedContainerColor = RcSurfaceElevated,
+                                            focusedBorderColor = RcAmber,
+                                            unfocusedBorderColor = RcSurfaceBorder,
+                                            focusedTextColor = RcTextPrimary,
+                                            unfocusedTextColor = RcTextPrimary
+                                        )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Interactive CAPTCHA challenge with animated expand
+                                    val challenge = authState.captchaChallenge
+                                    AnimatedVisibility(
+                                        visible = challenge != null && challenge.image != null,
+                                        enter = expandVertically() + fadeIn(),
+                                        exit = shrinkVertically() + fadeOut()
+                                    ) {
+                                        if (challenge != null && challenge.image != null) {
+                                            Column {
+                                                InteractiveCaptchaSolver(
+                                                    challenge = challenge,
+                                                    pointsList = authState.captchaPointList,
+                                                    manualPoints = authState.captchaPoints,
+                                                    onAddPoint = onAddCaptchaPoint,
+                                                    onRemoveLastPoint = onRemoveLastCaptchaPoint,
+                                                    onClearPoints = onClearCaptchaPoints,
+                                                    onAutoDetect = onAutoDetectCaptchaPoints,
+                                                    onManualPointsChange = onCaptchaPointsChange,
+                                                    onValidate = onValidateCaptcha,
+                                                    isBusy = authState.isBusy,
+                                                )
+                                                Spacer(modifier = Modifier.height(14.dp))
+                                            }
+                                        }
+                                    }
+
+                                    // CAPTCHA and OTP Action buttons
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = onPrepareCaptcha,
+                                            enabled = !authState.isBusy,
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("check_captcha_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Security,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(if (challenge == null) "Siapkan CAPTCHA" else "Ganti CAPTCHA", fontSize = 12.sp)
+                                        }
+
+                                        Button(
+                                            onClick = onRequestOtp,
+                                            enabled = !authState.isBusy && authState.email.isNotBlank(),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = RcAmber,
+                                                contentColor = RcDarkBackground
+                                            ),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("request_otp_button")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Kirim OTP", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    HorizontalDivider(color = RcSurfaceBorder)
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    // OTP Code Input
+                                    OutlinedTextField(
+                                        value = authState.otpCode,
+                                        onValueChange = onOtpChange,
+                                        label = { Text("Kode OTP dari Email") },
+                                        placeholder = { Text("Masukkan 6 digit angka") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Password, contentDescription = null, tint = RcGreen)
+                                        },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("otp_code_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = RcSurfaceElevated,
+                                            unfocusedContainerColor = RcSurfaceElevated,
+                                            focusedBorderColor = RcGreen,
+                                            unfocusedBorderColor = RcSurfaceBorder,
+                                            focusedTextColor = RcTextPrimary,
+                                            unfocusedTextColor = RcTextPrimary
+                                        )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Submit OTP Button with Loading Animation
+                                    Button(
+                                        onClick = onValidateOtp,
+                                        enabled = !authState.isBusy && authState.otpCode.isNotBlank(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = RcGreen,
+                                            contentColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp)
+                                            .testTag("validate_otp_button")
+                                    ) {
+                                        if (authState.isBusy) {
+                                            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color.White, strokeWidth = 2.5.dp)
+                                        } else {
+                                            Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Konfirmasi OTP & Masuk", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Column {
+                                    // Direct Token flow
+                                    Text(
+                                        text = "Tempel token dari DevTools RollerCoin untuk login langsung:",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = RcTextSecondary
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    OutlinedTextField(
+                                        value = authState.manualToken,
+                                        onValueChange = onManualTokenChange,
+                                        label = { Text("Bearer Access Token (Wajib)") },
+                                        placeholder = { Text("eyJhbGciOi...") },
+                                        maxLines = 3,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("manual_token_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = RcSurfaceElevated,
+                                            unfocusedContainerColor = RcSurfaceElevated,
+                                            focusedBorderColor = RcAmber,
+                                            unfocusedBorderColor = RcSurfaceBorder,
+                                            focusedTextColor = RcTextPrimary,
+                                            unfocusedTextColor = RcTextPrimary
+                                        )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    // Refresh Token Input
+                                    OutlinedTextField(
+                                        value = authState.manualRefreshToken,
+                                        onValueChange = onManualRefreshTokenChange,
+                                        label = { Text("Refresh Token (Disarankan untuk Auto-Renew)") },
+                                        placeholder = { Text("Refresh token dari inspect storage...") },
+                                        maxLines = 2,
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("manual_refresh_token_input"),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedContainerColor = RcSurfaceElevated,
+                                            unfocusedContainerColor = RcSurfaceElevated,
+                                            focusedBorderColor = RcCyan,
+                                            unfocusedBorderColor = RcSurfaceBorder,
+                                            focusedTextColor = RcTextPrimary,
+                                            unfocusedTextColor = RcTextPrimary
+                                        )
+                                    )
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    Text(
+                                        text = "ℹ Token dan Refresh Token disimpan aman di lokal. Jika token kedaluwarsa, aplikasi akan memperbarui token baru secara otomatis.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = RcCyan
+                                    )
+
+                                    Spacer(modifier = Modifier.height(16.dp))
+
+                                    Button(
+                                        onClick = onDirectTokenLogin,
+                                        enabled = !authState.isBusy && authState.manualToken.isNotBlank(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = RcAmber,
+                                            contentColor = RcDarkBackground
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp)
+                                            .testTag("direct_token_login_button")
+                                    ) {
+                                        if (authState.isBusy) {
+                                            CircularProgressIndicator(modifier = Modifier.size(22.dp), color = RcDarkBackground, strokeWidth = 2.5.dp)
+                                        } else {
+                                            Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Sambungkan & Masuk", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Advanced Settings Toggle
+                        TextButton(
+                            onClick = { showAdvancedSettings = !showAdvancedSettings },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Icon(
+                                imageVector = if (showAdvancedSettings) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = RcTextMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (showAdvancedSettings) "Sembunyikan Pengaturan User-Agent" else "Pengaturan Lanjutan (User-Agent)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RcTextMuted
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = showAdvancedSettings,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            Column(modifier = Modifier.padding(top = 8.dp)) {
+                                OutlinedTextField(
+                                    value = authState.userAgent,
+                                    onValueChange = onUserAgentChange,
+                                    label = { Text("Custom User-Agent") },
+                                    maxLines = 2,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = RcSurfaceElevated,
+                                        unfocusedContainerColor = RcSurfaceElevated,
+                                        focusedBorderColor = RcAmber,
+                                        unfocusedBorderColor = RcSurfaceBorder,
+                                        focusedTextColor = RcTextPrimary,
+                                        unfocusedTextColor = RcTextPrimary
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Feature highlights footer with gentle fade-in
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            alpha = cardAlpha
+                        },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                    border = BorderStroke(1.dp, RcSurfaceBorder)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(RcAmber)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Fitur RollerCoin Mobile:",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = RcAmber
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "• Monitoring Hashpower & Mining Room Realtime\n• Auto-Play Bot 15 Mini-Games dengan smart cooldown\n• Enkripsi token & penyimpanan aman Android Keystore",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RcTextSecondary,
+                            lineHeight = 18.sp
+                        )
+                    }
                 }
             }
         }
@@ -587,6 +821,21 @@ private fun InteractiveCaptchaSolver(
     modifier: Modifier = Modifier
 ) {
     var showManualInput by remember { mutableStateOf(false) }
+
+    // Pulsing radar animation for marked CAPTCHA pins
+    val pinInfinite = rememberInfiniteTransition(label = "captchaPinRadar")
+    val pinPulseScale by pinInfinite.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 1.45f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "pinPulseScale"
+    )
+    val pinPulseAlpha by pinInfinite.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 0.0f,
+        animationSpec = infiniteRepeatable(tween(1300, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "pinPulseAlpha"
+    )
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -642,9 +891,6 @@ private fun InteractiveCaptchaSolver(
 
             // Target banner
             val targetImg = challenge.targetImage
-            val targetIcons = challenge.targetIcons
-            val instruction = challenge.instruction
-
             if (targetImg != null) {
                 val targetBitmap = remember(targetImg) {
                     BitmapFactory.decodeByteArray(targetImg, 0, targetImg.size)?.asImageBitmap()
@@ -697,7 +943,7 @@ private fun InteractiveCaptchaSolver(
                 }
             }
 
-            // Interactive Touch Canvas
+            // Interactive Touch Canvas with animated reticle pins
             val captchaImg = challenge.image
             if (captchaImg != null) {
                 val bitmap = remember(captchaImg) {
@@ -744,24 +990,36 @@ private fun InteractiveCaptchaSolver(
                             contentScale = ContentScale.FillBounds
                         )
 
-                        // Reticle pins
+                        // Animated reticle pins with radar sonar pulse
                         pointsList.forEachIndexed { index, pt ->
                             val pinX = containerWidth * pt.ratioX
                             val pinY = containerHeight * pt.ratioY
 
                             Box(
                                 modifier = Modifier
-                                    .offset(x = pinX - 16.dp, y = pinY - 16.dp)
-                                    .size(32.dp),
+                                    .offset(x = pinX - 18.dp, y = pinY - 18.dp)
+                                    .size(36.dp),
                                 contentAlignment = Alignment.Center
                             ) {
+                                // Expanding radar pulse wave
                                 Box(
                                     modifier = Modifier
-                                        .size(32.dp)
+                                        .size(36.dp)
+                                        .scale(pinPulseScale)
+                                        .clip(CircleShape)
+                                        .background(RcAmber.copy(alpha = pinPulseAlpha))
+                                )
+
+                                // Outer glow border
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
                                         .clip(CircleShape)
                                         .background(RcAmber.copy(alpha = 0.35f))
                                         .border(1.5.dp, RcAmber, CircleShape)
                                 )
+
+                                // Number badge
                                 Box(
                                     modifier = Modifier
                                         .size(18.dp)
@@ -870,7 +1128,11 @@ private fun InteractiveCaptchaSolver(
                 }
             }
 
-            AnimatedVisibility(visible = showManualInput) {
+            AnimatedVisibility(
+                visible = showManualInput,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
                 Column(modifier = Modifier.padding(top = 8.dp)) {
                     OutlinedTextField(
                         value = manualPoints,

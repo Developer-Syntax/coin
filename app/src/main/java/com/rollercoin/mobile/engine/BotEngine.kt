@@ -32,13 +32,26 @@ object BotEngine {
     private val _isBackgroundServiceEnabled = MutableStateFlow(true)
     val isBackgroundServiceEnabled: StateFlow<Boolean> = _isBackgroundServiceEnabled.asStateFlow()
 
+    private val _isBatterySaverEnabled = MutableStateFlow(true)
+    val isBatterySaverEnabled: StateFlow<Boolean> = _isBatterySaverEnabled.asStateFlow()
+
     private var repositoryRef: RollerCoinRepository? = null
     private var onRefreshDashboardCallback: (() -> Unit)? = null
 
-    fun initialize(savedDelay: Int, floatingBubbleEnabled: Boolean = true, backgroundEnabled: Boolean = true) {
+    fun initialize(
+        savedDelay: Int,
+        floatingBubbleEnabled: Boolean = true,
+        backgroundEnabled: Boolean = true,
+        batterySaverEnabled: Boolean = true,
+    ) {
         _botUiState.update { it.copy(delayBetweenGamesSeconds = savedDelay.coerceIn(3, 30)) }
         _isFloatingBubbleEnabled.value = floatingBubbleEnabled
         _isBackgroundServiceEnabled.value = backgroundEnabled
+        _isBatterySaverEnabled.value = batterySaverEnabled
+    }
+
+    fun setBatterySaverEnabled(enabled: Boolean) {
+        _isBatterySaverEnabled.value = enabled
     }
 
     fun setFloatingBubbleEnabled(enabled: Boolean, context: Context?) {

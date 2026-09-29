@@ -33,11 +33,13 @@ fun BotRunnerScreen(
     isLoggedIn: Boolean,
     isFloatingBubbleEnabled: Boolean,
     isBackgroundServiceEnabled: Boolean,
+    isBatterySaverEnabled: Boolean = true,
     onStartBot: () -> Unit,
     onStopBot: () -> Unit,
     onSetDelay: (Int) -> Unit,
     onToggleFloatingBubble: (Boolean) -> Unit,
     onToggleBackgroundService: (Boolean) -> Unit,
+    onToggleBatterySaver: (Boolean) -> Unit = {},
     onClearLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -358,6 +360,50 @@ fun BotRunnerScreen(
                                 checkedThumbColor = Color.White,
                                 checkedTrackColor = RcGreen
                             )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = RcSurfaceBorder)
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Battery Saver Mode Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.BatteryChargingFull,
+                                    contentDescription = null,
+                                    tint = if (isBatterySaverEnabled) RcGreen else RcTextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Mode Hemat Baterai (Polling)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = RcTextPrimary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Mengurangi frekuensi polling hash power di latar belakang (dari 60s menjadi 180s) guna menghemat daya & kuota internet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcTextSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked = isBatterySaverEnabled,
+                            onCheckedChange = onToggleBatterySaver,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = RcGreen
+                            ),
+                            modifier = Modifier.testTag("bot_battery_saver_toggle")
                         )
                     }
 

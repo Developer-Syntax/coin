@@ -51,15 +51,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Inform background service that the app is in the foreground
-        // so the service will remove any duplicate overlay window
+        // Inform background service and ViewModel that the app is in the foreground
         RollerCoinBotService.setAppForeground(this, true)
+        viewModel.setAppForeground(true)
     }
 
     override fun onStop() {
         super.onStop()
-        // Inform background service that the app is minimized
+        // Inform background service and ViewModel that the app is minimized/in background
         RollerCoinBotService.setAppForeground(this, false)
+        viewModel.setAppForeground(false)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,7 +182,8 @@ class MainActivity : ComponentActivity() {
                                     authState = authState,
                                     onRefresh = { viewModel.refreshDashboard() },
                                     onNavigateToBot = { currentScreen = Screen.BOT },
-                                    onManualRefreshSession = { viewModel.manualRefreshSession() }
+                                    onManualRefreshSession = { viewModel.manualRefreshSession() },
+                                    onToggleBatterySaver = { viewModel.toggleBatterySaver(it) }
                                 )
 
                                 Screen.BOT -> BotRunnerScreen(
@@ -189,11 +191,13 @@ class MainActivity : ComponentActivity() {
                                     isLoggedIn = authState.isLoggedIn,
                                     isFloatingBubbleEnabled = isFloatingBubbleEnabled,
                                     isBackgroundServiceEnabled = isBackgroundServiceEnabled,
+                                    isBatterySaverEnabled = dashboardState.isBatterySaverEnabled,
                                     onStartBot = { viewModel.startAutoBot() },
                                     onStopBot = { viewModel.stopAutoBot() },
                                     onSetDelay = { viewModel.setBotDelay(it) },
                                     onToggleFloatingBubble = { viewModel.toggleFloatingBubble(it) },
                                     onToggleBackgroundService = { viewModel.toggleBackgroundService(it) },
+                                    onToggleBatterySaver = { viewModel.toggleBatterySaver(it) },
                                     onClearLogs = { viewModel.clearLogs() }
                                 )
 
@@ -202,6 +206,7 @@ class MainActivity : ComponentActivity() {
                                     dashboardState = dashboardState,
                                     onUserAgentChange = { viewModel.updateUserAgent(it) },
                                     onManualRefreshSession = { viewModel.manualRefreshSession() },
+                                    onToggleBatterySaver = { viewModel.toggleBatterySaver(it) },
                                     onLogout = { viewModel.logout() }
                                 )
                             }

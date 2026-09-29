@@ -50,6 +50,7 @@ fun DashboardScreen(
     onRefresh: () -> Unit,
     onNavigateToBot: () -> Unit,
     onManualRefreshSession: () -> Unit,
+    onToggleBatterySaver: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -500,6 +501,99 @@ fun DashboardScreen(
                                         .fillMaxHeight()
                                         .background(RcCyan)
                                 )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = RcSurfaceBorder)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Polling Frequency & Battery Saver Info Card
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (dashboardState.isBatterySaverEnabled) RcGreen.copy(alpha = 0.08f) else RcSurfaceElevated,
+                        border = BorderStroke(
+                            1.dp,
+                            if (dashboardState.isBatterySaverEnabled) RcGreen.copy(alpha = 0.35f) else RcSurfaceBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BatteryChargingFull,
+                                        contentDescription = null,
+                                        tint = if (dashboardState.isBatterySaverEnabled) RcGreen else RcTextMuted,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = "Mode Hemat Baterai (Polling)",
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = RcTextPrimary
+                                        )
+                                        Text(
+                                            text = if (dashboardState.isBatterySaverEnabled)
+                                                "Polling latar belakang diperlambat ke 180s (3 menit)"
+                                            else
+                                                "Polling latar belakang normal (60s)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = RcTextSecondary
+                                        )
+                                    }
+                                }
+
+                                Switch(
+                                    checked = dashboardState.isBatterySaverEnabled,
+                                    onCheckedChange = onToggleBatterySaver,
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.Black,
+                                        checkedTrackColor = RcGreen
+                                    ),
+                                    modifier = Modifier.testTag("dashboard_battery_saver_toggle")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(if (dashboardState.isAppInForeground) RcCyan else RcAmber)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Interval: ${dashboardState.currentPollingIntervalSeconds}s (${if (dashboardState.isAppInForeground) "Di Depan" else "Latar Belakang"})",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = if (dashboardState.isAppInForeground) RcCyan else RcAmber
+                                    )
+                                }
+
+                                if (dashboardState.lastPowerUpdateTime > 0L) {
+                                    val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                                    Text(
+                                        text = "Update: ${timeFmt.format(Date(dashboardState.lastPowerUpdateTime))}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = RcTextMuted
+                                    )
+                                }
                             }
                         }
                     }

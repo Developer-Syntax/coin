@@ -40,6 +40,13 @@ class TokenStore(context: Context) {
         runCatching { preferences.edit().putInt(key, value).apply() }
     }
 
+    fun getBoolean(key: String, default: Boolean): Boolean =
+        runCatching { preferences.getBoolean(key, default) }.getOrDefault(default)
+
+    fun putBoolean(key: String, value: Boolean) {
+        runCatching { preferences.edit().putBoolean(key, value).apply() }
+    }
+
     fun remove(key: String) {
         runCatching { preferences.edit().remove(key).apply() }
     }
