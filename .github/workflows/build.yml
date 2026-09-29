@@ -2,29 +2,10 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+    branches: [ "main", "master" ]
   pull_request:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+    branches: [ "main", "master" ]
   workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Build variant to produce'
-        required: true
-        default: 'debug'
-        type: choice
-        options:
-          - debug
-          - release
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,87 +13,89 @@ concurrency:
 
 jobs:
   build:
-    name: Build Android App
+    name: Build & Test APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK Licenses & Install Components
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-36" "platforms;android-35" "build-tools;36.0.0" "platform-tools" || true
-
-      - name: Prepare Debug Keystore
-        run: |
-          if [ -f "debug.keystore.base64" ] && [ ! -s "debug.keystore" ]; then
-            echo "Decoding debug.keystore from debug.keystore.base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
-          fi
-          if [ ! -s "debug.keystore" ]; then
-            echo "Generating debug.keystore fallback..."
-            keytool -genkey -v -keystore debug.keystore \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          ls -lh debug.keystore
+          java-version: '21'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
-          cache-read-only: false
 
-      - name: Make Gradle Wrapper Executable
+      - name: Accept Android Licenses & Prepare SDK
         run: |
-          if [ ! -f "./gradlew" ]; then
-            echo "Generating gradlew wrapper..."
-            gradle wrapper --gradle-version 8.10.2
+          mkdir -p "$ANDROID_HOME/licenses"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "84831b9409646a533e30ed73b4e673b5c2b04c11" >> "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> "$ANDROID_HOME/licenses/android-sdk-preview-license"
+
+          # Find sdkmanager
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDK_MGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            SDK_MGR="sdkmanager"
+          else
+            SDK_MGR=""
           fi
-          chmod +x ./gradlew
+
+          if [ -n "$SDK_MGR" ]; then
+            yes | "$SDK_MGR" --licenses || true
+            "$SDK_MGR" "platforms;android-36" "build-tools;36.0.0" || true
+          fi
+
+      - name: Setup Debug Keystore
+        run: |
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              echo "Decoding debug.keystore from base64..."
+              base64 -d debug.keystore.base64 > debug.keystore
+            else
+              echo "Generating new debug.keystore..."
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+          ls -la debug.keystore
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x ./gradlew
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Build Debug APK
-        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' || github.event_name != 'workflow_dispatch' }}
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: Build Release APK
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
-
-      - name: List Generated APKs
+      - name: Verify APK Generated
         run: |
-          echo "=== Generated APK Files ==="
-          find app/build/outputs/apk/ -type f -name "*.apk" -exec ls -lh {} \;
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "APK generated successfully!"
+            ls -lh app/build/outputs/apk/debug/app-debug.apk
+          else
+            echo "Error: APK not found at app/build/outputs/apk/debug/app-debug.apk"
+            exit 1
+          fi
 
-      - name: Upload Debug APK Artifact
-        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '' || github.event_name != 'workflow_dispatch' }}
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: RollerCoin-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          name: RollerCoin-Mobile-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
-
-      - name: Upload Release APK Artifact
-        if: ${{ github.event.inputs.build_type == 'release' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: RollerCoin-release-apk
-          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
