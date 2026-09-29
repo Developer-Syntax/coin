@@ -410,12 +410,25 @@ class RollerCoinRepository(
 
         repeat(5) {
             try {
-                val status = call(
+                // bot.php treats an unavailable/negative CAPTCHA status as
+                // "no game CAPTCHA" and continues with an empty seccode.
+                // The endpoint currently returns 404 for some valid accounts,
+                // so routing it through call() would incorrectly abort every
+                // game before encode-start-game-data.
+                val status = api.request(
                     "GET",
                     "$ROLLERCOIN/api/game/captcha-status/$uid",
+                    authHeaders(),
                 )
-                val data = status.json?.optJSONObject("data")
+                if (status.code == 404) return ""
+                if (status.code !in 200..299) {
+                    throw ApiException("Game CAPTCHA HTTP ${status.code}: ${status.body.take(180)}")
+                }
+                val response = status.json
                     ?: throw ApiException("Game CAPTCHA: respons status tidak valid")
+                if (!response.optBoolean("success", false)) return ""
+                val data = response.optJSONObject("data")
+                    ?: throw ApiException("Game CAPTCHA: data status tidak valid")
 
                 if (!data.optBoolean("is_captcha_required", false)) {
                     return ""
