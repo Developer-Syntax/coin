@@ -41,3 +41,12 @@ Native Android application and automation dashboard for RollerCoin, built with K
 - `RollerCoinRepository`: REST API client & OkHttp WebSocket integration
 - `Crypto`: AES-256-CBC encryption matching the RollerCoin protocol
 - `TokenStore`: Encrypted SharedPreferences with Android Keystore
+
+## CI/CD Build via GitHub Actions
+
+This repository includes an automated GitHub Actions workflow (`.github/workflows/build.yml`) that builds the APK:
+
+- **Automatic Trigger**: Triggers automatically on every `push` and `pull_request` to `main` / `master`.
+- **Manual Trigger (`workflow_dispatch`)**: Can be triggered manually from the GitHub Actions tab with choice of `debug` or `release` build.
+- **Artifacts**: Once the build completes, the output APK is uploaded as a downloadable artifact in the run summary (`RollerCoin-debug-apk` / `RollerCoin-release-apk`).
+- **Resilience**: Automatically ensures required Android SDK components (API 36 & build-tools 36.0.0) and debug keystore are present to prevent any build failures.
