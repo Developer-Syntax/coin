@@ -31,13 +31,22 @@ import com.rollercoin.mobile.ui.theme.*
 fun BotRunnerScreen(
     botState: BotUiState,
     isLoggedIn: Boolean,
+    isFloatingBubbleEnabled: Boolean,
+    isBackgroundServiceEnabled: Boolean,
     onStartBot: () -> Unit,
     onStopBot: () -> Unit,
     onSetDelay: (Int) -> Unit,
+    onToggleFloatingBubble: (Boolean) -> Unit,
+    onToggleBackgroundService: (Boolean) -> Unit,
     onClearLogs: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val logListState = rememberLazyListState()
+
+    var hasOverlayPermission by remember {
+        mutableStateOf(android.provider.Settings.canDrawOverlays(context))
+    }
 
     // Auto-scroll logs to bottom on new entries
     LaunchedEffect(botState.logs.size) {
@@ -260,6 +269,140 @@ fun BotRunnerScreen(
                     ) {
                         Text("3s (Cepat)", style = MaterialTheme.typography.labelSmall, color = RcTextMuted)
                         Text("20s (Aman)", style = MaterialTheme.typography.labelSmall, color = RcTextMuted)
+                    }
+                }
+            }
+        }
+
+        // Background Running & Floating Ball Configuration
+        item {
+            SectionHeader(title = "Mode Latar Belakang & Bola Mengambang", icon = Icons.Default.FlipToFront)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = RcSurface),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(RcSurfaceBorder))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Floating Bubble Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xCC0F172A))
+                                        .border(1.5.dp, RcAmber, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(RcGreen))
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Bola Mengambang (Floating Ball)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = RcTextPrimary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Menampilkan bola mengambang semi-transparan di samping layar. Klik bola untuk melihat progres game realtime.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcTextSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked = isFloatingBubbleEnabled,
+                            onCheckedChange = onToggleFloatingBubble,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = RcAmber
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = RcSurfaceBorder)
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Background Service Toggle
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Jalankan di Latar Belakang (Foreground Service)",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = RcTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Bot tetap berjalan otomatis saat aplikasi diminimalkan atau membuka aplikasi lain.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RcTextSecondary
+                            )
+                        }
+
+                        Switch(
+                            checked = isBackgroundServiceEnabled,
+                            onCheckedChange = onToggleBackgroundService,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = RcGreen
+                            )
+                        )
+                    }
+
+                    // System Overlay Permission Banner (if not yet granted)
+                    if (!hasOverlayPermission && isFloatingBubbleEnabled) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RcCyan.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Info, contentDescription = null, tint = RcCyan, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Izin Tampil di Luar Aplikasi",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = RcCyan
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Agar bola mengambang tetap muncul di atas aplikasi lain dan layar beranda, berikan izin \"Tampilkan di atas aplikasi lain\".",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = RcTextSecondary
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        val intent = android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = RcCyan, contentColor = RcDarkBackground),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Buka Pengaturan Izin Overlay", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -1,10 +1,13 @@
 package com.rollercoin.mobile
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -24,9 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.rollercoin.mobile.ui.components.ActiveGameOverlayBanner
+import com.rollercoin.mobile.ui.components.FloatingGameBubble
 import com.rollercoin.mobile.ui.screens.AccountScreen
 import com.rollercoin.mobile.ui.screens.BotRunnerScreen
 import com.rollercoin.mobile.ui.screens.DashboardScreen
+import com.rollercoin.mobile.ui.screens.LoginScreen
 import com.rollercoin.mobile.ui.theme.RcAmber
 import com.rollercoin.mobile.ui.theme.RcDarkBackground
 import com.rollercoin.mobile.ui.theme.RcSurface
@@ -37,7 +42,7 @@ import com.rollercoin.mobile.ui.theme.RollerCoinTheme
 enum class Screen(val label: String, val icon: ImageVector, val tag: String) {
     DASHBOARD("Dashboard", Icons.Default.Dashboard, "nav_dashboard"),
     BOT("Auto-Bot", Icons.Default.SmartToy, "nav_bot"),
-    ACCOUNT("Akun", Icons.Default.AccountCircle, "nav_account"),
+    ACCOUNT("Profil", Icons.Default.AccountCircle, "nav_account"),
 }
 
 class MainActivity : ComponentActivity() {
@@ -53,102 +58,148 @@ class MainActivity : ComponentActivity() {
                 val dashboardState by viewModel.dashboardUiState.collectAsStateWithLifecycle()
                 val activeGameState by viewModel.activeGameUiState.collectAsStateWithLifecycle()
                 val botState by viewModel.botUiState.collectAsStateWithLifecycle()
+                val isFloatingBubbleEnabled by viewModel.isFloatingBubbleEnabled.collectAsStateWithLifecycle()
+                val isBackgroundServiceEnabled by viewModel.isBackgroundServiceEnabled.collectAsStateWithLifecycle()
+
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { /* notification permission result handled */ }
+
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
 
                 var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
 
-                BackHandler(enabled = currentScreen != Screen.DASHBOARD) {
-                    currentScreen = Screen.DASHBOARD
-                }
-
-                Scaffold(
-                    bottomBar = {
-                        Column {
-                            // Active Game floating banner
-                            AnimatedVisibility(
-                                visible = activeGameState.activeGame != null,
-                                enter = slideInVertically(initialOffsetY = { it }),
-                                exit = slideOutVertically(targetOffsetY = { it })
-                            ) {
-                                ActiveGameOverlayBanner(activeState = activeGameState)
-                            }
-
-                            NavigationBar(
-                                containerColor = RcSurface,
-                                contentColor = RcAmber,
-                                tonalElevation = 8.dp,
-                                windowInsets = WindowInsets.navigationBars
-                            ) {
-                                Screen.values().forEach { screen ->
-                                    val isSelected = currentScreen == screen
-                                    NavigationBarItem(
-                                        selected = isSelected,
-                                        onClick = { currentScreen = screen },
-                                        icon = {
-                                            Icon(
-                                                imageVector = screen.icon,
-                                                contentDescription = screen.label
-                                            )
-                                        },
-                                        label = {
-                                            Text(
-                                                text = screen.label,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = RcAmber,
-                                            selectedTextColor = RcAmber,
-                                            unselectedIconColor = RcTextMuted,
-                                            unselectedTextColor = RcTextMuted,
-                                            indicatorColor = RcAmber.copy(alpha = 0.15f)
-                                        ),
-                                        modifier = Modifier.testTag(screen.tag)
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    contentWindowInsets = WindowInsets.statusBars
-                ) { innerPadding ->
+                // Separate Login Screen from Dashboard & Bot screens completely
+                if (!authState.isLoggedIn) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(RcDarkBackground)
-                            .padding(innerPadding)
+                            .windowInsetsPadding(WindowInsets.systemBars)
                     ) {
-                        when (currentScreen) {
-                            Screen.DASHBOARD -> DashboardScreen(
-                                dashboardState = dashboardState,
-                                onRefresh = { viewModel.refreshDashboard() },
-                                onNavigateToBot = { currentScreen = Screen.BOT }
-                            )
+                        LoginScreen(
+                            authState = authState,
+                            onEmailChange = { viewModel.updateEmail(it) },
+                            onUserAgentChange = { viewModel.updateUserAgent(it) },
+                            onOtpChange = { viewModel.updateOtpCode(it) },
+                            onManualTokenChange = { viewModel.updateManualToken(it) },
+                            onManualRefreshTokenChange = { viewModel.updateManualRefreshToken(it) },
+                            onCaptchaPointsChange = { viewModel.updateCaptchaPoints(it) },
+                            onAddCaptchaPoint = { x, y, rx, ry -> viewModel.addCaptchaPoint(x, y, rx, ry) },
+                            onRemoveLastCaptchaPoint = { viewModel.removeLastCaptchaPoint() },
+                            onClearCaptchaPoints = { viewModel.clearCaptchaPoints() },
+                            onAutoDetectCaptchaPoints = { viewModel.autoDetectCaptchaPoints() },
+                            onPrepareCaptcha = { viewModel.prepareCaptcha() },
+                            onValidateCaptcha = { viewModel.validateCaptcha() },
+                            onRequestOtp = { viewModel.requestOtp() },
+                            onValidateOtp = { viewModel.validateOtp() },
+                            onDirectTokenLogin = { viewModel.directTokenLogin() }
+                        )
+                    }
+                } else {
+                    BackHandler(enabled = currentScreen != Screen.DASHBOARD) {
+                        currentScreen = Screen.DASHBOARD
+                    }
 
-                            Screen.BOT -> BotRunnerScreen(
+                    Scaffold(
+                        bottomBar = {
+                            Column {
+                                // Active Game floating banner
+                                AnimatedVisibility(
+                                    visible = activeGameState.activeGame != null,
+                                    enter = slideInVertically(initialOffsetY = { it }),
+                                    exit = slideOutVertically(targetOffsetY = { it })
+                                ) {
+                                    ActiveGameOverlayBanner(activeState = activeGameState)
+                                }
+
+                                NavigationBar(
+                                    containerColor = RcSurface,
+                                    contentColor = RcAmber,
+                                    tonalElevation = 8.dp,
+                                    windowInsets = WindowInsets.navigationBars
+                                ) {
+                                    Screen.values().forEach { screen ->
+                                        val isSelected = currentScreen == screen
+                                        NavigationBarItem(
+                                            selected = isSelected,
+                                            onClick = { currentScreen = screen },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = screen.icon,
+                                                    contentDescription = screen.label
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = screen.label,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = RcAmber,
+                                                selectedTextColor = RcAmber,
+                                                unselectedIconColor = RcTextMuted,
+                                                unselectedTextColor = RcTextMuted,
+                                                indicatorColor = RcAmber.copy(alpha = 0.15f)
+                                            ),
+                                            modifier = Modifier.testTag(screen.tag)
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        contentWindowInsets = WindowInsets.statusBars
+                    ) { innerPadding ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(RcDarkBackground)
+                                .padding(innerPadding)
+                        ) {
+                            when (currentScreen) {
+                                Screen.DASHBOARD -> DashboardScreen(
+                                    dashboardState = dashboardState,
+                                    authState = authState,
+                                    onRefresh = { viewModel.refreshDashboard() },
+                                    onNavigateToBot = { currentScreen = Screen.BOT },
+                                    onManualRefreshSession = { viewModel.manualRefreshSession() }
+                                )
+
+                                Screen.BOT -> BotRunnerScreen(
+                                    botState = botState,
+                                    isLoggedIn = authState.isLoggedIn,
+                                    isFloatingBubbleEnabled = isFloatingBubbleEnabled,
+                                    isBackgroundServiceEnabled = isBackgroundServiceEnabled,
+                                    onStartBot = { viewModel.startAutoBot() },
+                                    onStopBot = { viewModel.stopAutoBot() },
+                                    onSetDelay = { viewModel.setBotDelay(it) },
+                                    onToggleFloatingBubble = { viewModel.toggleFloatingBubble(it) },
+                                    onToggleBackgroundService = { viewModel.toggleBackgroundService(it) },
+                                    onClearLogs = { viewModel.clearLogs() }
+                                )
+
+                                Screen.ACCOUNT -> AccountScreen(
+                                    authState = authState,
+                                    dashboardState = dashboardState,
+                                    onUserAgentChange = { viewModel.updateUserAgent(it) },
+                                    onManualRefreshSession = { viewModel.manualRefreshSession() },
+                                    onLogout = { viewModel.logout() }
+                                )
+                            }
+                        }
+
+                        // In-App Semi-Transparent Floating Ball on screen side
+                        if (isFloatingBubbleEnabled && botState.isAutoRunning) {
+                            FloatingGameBubble(
                                 botState = botState,
-                                isLoggedIn = authState.isLoggedIn,
-                                onStartBot = { viewModel.startAutoBot() },
+                                activeState = activeGameState,
                                 onStopBot = { viewModel.stopAutoBot() },
-                                onSetDelay = { viewModel.setBotDelay(it) },
-                                onClearLogs = { viewModel.clearLogs() }
-                            )
-
-                            Screen.ACCOUNT -> AccountScreen(
-                                authState = authState,
-                                onEmailChange = { viewModel.updateEmail(it) },
-                                onUserAgentChange = { viewModel.updateUserAgent(it) },
-                                onOtpChange = { viewModel.updateOtpCode(it) },
-                                onManualTokenChange = { viewModel.updateManualToken(it) },
-                                onCaptchaPointsChange = { viewModel.updateCaptchaPoints(it) },
-                                onAddCaptchaPoint = { x, y, rx, ry -> viewModel.addCaptchaPoint(x, y, rx, ry) },
-                                onRemoveLastCaptchaPoint = { viewModel.removeLastCaptchaPoint() },
-                                onClearCaptchaPoints = { viewModel.clearCaptchaPoints() },
-                                onAutoDetectCaptchaPoints = { viewModel.autoDetectCaptchaPoints() },
-                                onPrepareCaptcha = { viewModel.prepareCaptcha() },
-                                onValidateCaptcha = { viewModel.validateCaptcha() },
-                                onRequestOtp = { viewModel.requestOtp() },
-                                onValidateOtp = { viewModel.validateOtp() },
-                                onDirectTokenLogin = { viewModel.directTokenLogin() },
-                                onLogout = { viewModel.logout() }
+                                onOpenBotTab = { currentScreen = Screen.BOT }
                             )
                         }
                     }

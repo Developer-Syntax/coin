@@ -20,15 +20,26 @@ data class Profile(
     val active: Boolean,
     val premium: Boolean?,
     val miners: Int?,
+    val racks: Int? = null,
     val maxPower: Int?,
     val leagueId: String,
     val registration: String,
     val publicProfileLink: String,
+    val avatarUrl: String = "",
+    val rank: Long? = null,
+    val bonusPowerPercent: Double? = null,
+    val referrals: Int? = null,
+    val currentLevel: Int? = null,
+    val experience: Long? = null,
 )
 
 data class PowerInfo(
     val total: Long,
     val penalty: Long,
+    val gamesPower: Long = 0L,
+    val minersPower: Long = 0L,
+    val bonusPower: Long = 0L,
+    val racksPower: Long = 0L,
 ) {
     val net: Long get() = (total - penalty).coerceAtLeast(0L)
 }
@@ -49,6 +60,8 @@ data class WalletCurrency(
     val balance: Double = 0.0,
     val toSmall: Double = 1.0,
     val precision: Int = 8,
+    val symbol: String = "",
+    val iconUrl: String = "",
 )
 
 data class Dashboard(

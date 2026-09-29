@@ -56,6 +56,8 @@ class RollerCoinRepository(
     fun userId(): String = uid
 
     fun isTokenExpired(): Boolean = TokenUtils.isExpired(accessToken)
+    fun tokenExpiresAt(): Long = TokenUtils.expiresAt(accessToken)
+    fun hasRefreshToken(): Boolean = refreshToken.isNotBlank()
 
     fun captchaStatus(
         fingerprint: String = DEFAULT_FINGERPRINT,
@@ -254,10 +256,17 @@ class RollerCoinRepository(
             active = !data.optBoolean("is_banned", false),
             premium = if (data.has("is_premium")) data.optBoolean("is_premium") else null,
             miners = if (data.has("user_miners_amount")) data.optInt("user_miners_amount") else null,
+            racks = data.optInt("user_racks_amount", data.optInt("racks_amount", 0)).takeIf { it > 0 },
             maxPower = data.optInt("max_total_power", 0).takeIf { it > 0 },
-            leagueId = data.optJSONArray("leagues_ids")?.optString(0, "N/A") ?: "N/A",
-            registration = data.optString("registration", "N/A"),
-            publicProfileLink = data.optString("public_profile_link", "N/A"),
+            leagueId = data.optJSONArray("leagues_ids")?.optString(0, "N/A") ?: data.optString("league", "N/A"),
+            registration = data.optString("registration", data.optString("created_at", "N/A")),
+            publicProfileLink = data.optString("public_profile_link", "$ROLLERCOIN/p/$uid"),
+            avatarUrl = data.optString("avatar", data.optString("avatar_url", "")),
+            rank = data.optLong("rank", data.optLong("place", 0L)).takeIf { it > 0L },
+            bonusPowerPercent = data.optDouble("bonus_power", data.optDouble("bonus_percent", 0.0)).takeIf { it > 0.0 },
+            referrals = data.optInt("referrals_amount", data.optInt("referrals", 0)),
+            currentLevel = data.optInt("current_level", data.optInt("level", 0)).takeIf { it > 0 },
+            experience = data.optLong("experience", data.optLong("exp", 0L)).takeIf { it > 0L },
         )
     }
 
@@ -275,9 +284,29 @@ class RollerCoinRepository(
     }
 
     fun currencies(): List<WalletCurrency> {
-        val res = call("GET", "$ROLLERCOIN/api/wallet/get-currencies-config")
-        val data = successData(res, "get-currencies-config")
+        val res = runCatching { call("GET", "$ROLLERCOIN/api/wallet/get-currencies-config") }.getOrNull()
+            ?: return emptyList()
+        val data = runCatching { successData(res, "get-currencies-config") }.getOrNull() ?: return emptyList()
         val array = data.optJSONArray("currencies_config") ?: return emptyList()
+
+        val balancesMap = mutableMapOf<String, Double>()
+        runCatching {
+            val balRes = api.request("GET", "$ROLLERCOIN/api/wallet/balances", authHeaders())
+            val balData = balRes.json?.optJSONObject("data")
+            balData?.let { bd ->
+                val itKeys = bd.keys()
+                while (itKeys.hasNext()) {
+                    val k = itKeys.next()
+                    val coinObj = bd.optJSONObject(k)
+                    if (coinObj != null) {
+                        balancesMap[k.uppercase()] = coinObj.optDouble("balance", coinObj.optDouble("amount", 0.0))
+                    } else {
+                        balancesMap[k.uppercase()] = bd.optDouble(k, 0.0)
+                    }
+                }
+            }
+        }
+
         val result = mutableListOf<WalletCurrency>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
@@ -286,7 +315,20 @@ class RollerCoinRepository(
             val toSmall = item.optDouble("to_small", 1.0)
             val precision = item.optInt("precision_to_balance", item.optInt("precision", 8))
             val name = item.optString("name", code)
-            result.add(WalletCurrency(code = code, name = name, toSmall = toSmall, precision = precision))
+            val symbol = item.optString("symbol", code)
+            val icon = item.optString("icon_url", item.optString("icon", ""))
+            val balance = balancesMap[code] ?: item.optDouble("balance", 0.0)
+            result.add(
+                WalletCurrency(
+                    code = code,
+                    name = name,
+                    balance = balance,
+                    toSmall = toSmall,
+                    precision = precision,
+                    symbol = symbol,
+                    iconUrl = icon,
+                )
+            )
         }
         return result
     }
@@ -688,7 +730,14 @@ private class RollerCoinSocket(
             val message = runCatching { JSONObject(raw) }.getOrNull() ?: continue
             if (message.optString("cmd") == "power") {
                 val values = message.optJSONObject("cmdval") ?: return null
-                return PowerInfo(values.optLong("total"), values.optLong("penalty"))
+                return PowerInfo(
+                    total = values.optLong("total"),
+                    penalty = values.optLong("penalty"),
+                    gamesPower = values.optLong("games", values.optLong("game_power", values.optLong("games_power", 0L))),
+                    minersPower = values.optLong("miners", values.optLong("miner_power", values.optLong("miners_power", 0L))),
+                    bonusPower = values.optLong("bonus", values.optLong("bonus_power", 0L)),
+                    racksPower = values.optLong("racks", values.optLong("rack_power", values.optLong("racks_power", 0L))),
+                )
             }
         }
         return null
@@ -700,13 +749,15 @@ private class RollerCoinSocket(
     }
 }
 
-private object TokenUtils {
+object TokenUtils {
     fun userId(token: String): String = payload(token)?.optString("user_id").orEmpty()
 
     fun isExpired(token: String): Boolean {
-        val expiresAt = payload(token)?.optLong("exp", 0L) ?: 0L
+        val expiresAt = expiresAt(token)
         return expiresAt > 0L && System.currentTimeMillis() / 1_000L >= expiresAt
     }
+
+    fun expiresAt(token: String): Long = payload(token)?.optLong("exp", 0L) ?: 0L
 
     private fun payload(token: String): JSONObject? = runCatching {
         val pieces = token.removePrefix("Bearer ").split('.')

@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.rollercoin.mobile.engine.BotEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,13 +30,17 @@ data class AuthUiState(
     val userAgent: String = DEFAULT_USER_AGENT,
     val otpCode: String = "",
     val manualToken: String = "",
+    val manualRefreshToken: String = "",
     val captchaChallenge: CaptchaChallenge? = null,
     val captchaPoints: String = "",
     val captchaPointList: List<CaptchaPoint> = emptyList(),
     val otpRequested: Boolean = false,
     val isBusy: Boolean = false,
+    val isCheckingSavedSession: Boolean = true,
     val isLoggedIn: Boolean = false,
     val userId: String = "",
+    val hasRefreshToken: Boolean = false,
+    val tokenExpiresAt: Long = 0L,
     val message: String? = null,
     val error: String? = null,
 )
@@ -80,44 +85,115 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
     private val _dashboardUiState = MutableStateFlow(DashboardUiState())
     val dashboardUiState: StateFlow<DashboardUiState> = _dashboardUiState.asStateFlow()
 
-    private val _activeGameUiState = MutableStateFlow(ActiveGameUiState())
-    val activeGameUiState: StateFlow<ActiveGameUiState> = _activeGameUiState.asStateFlow()
-
-    private val _botUiState = MutableStateFlow(BotUiState())
-    val botUiState: StateFlow<BotUiState> = _botUiState.asStateFlow()
+    val activeGameUiState: StateFlow<ActiveGameUiState> = BotEngine.activeGameUiState
+    val botUiState: StateFlow<BotUiState> = BotEngine.botUiState
+    val isFloatingBubbleEnabled: StateFlow<Boolean> = BotEngine.isFloatingBubbleEnabled
+    val isBackgroundServiceEnabled: StateFlow<Boolean> = BotEngine.isBackgroundServiceEnabled
 
     private var otpRequest: OtpRequest? = null
-    private var botJob: Job? = null
 
     init {
         restoreSavedState()
     }
 
     private fun restoreSavedState() {
-        runCatching {
-            val savedEmail = store.get("email")
-            val savedAgent = store.get("userAgent").ifBlank { DEFAULT_USER_AGENT }
-            val savedAccess = store.get("access")
-            val savedRefresh = store.get("refresh")
-            val savedDelay = store.getInt("botDelay", 5).coerceIn(3, 30)
+        viewModelScope.launch {
+            _authUiState.update { it.copy(isCheckingSavedSession = true) }
+            try {
+                val savedEmail = store.get("email")
+                val savedAgent = store.get("userAgent").ifBlank { DEFAULT_USER_AGENT }
+                val savedAccess = store.get("access")
+                val savedRefresh = store.get("refresh")
+                val savedDelay = store.getInt("botDelay", 5).coerceIn(3, 30)
 
-            _botUiState.update { it.copy(delayBetweenGamesSeconds = savedDelay) }
+                BotEngine.initialize(savedDelay)
 
-            if (savedAccess.isNotBlank()) {
-                repository.setCredentials(savedAccess, savedRefresh, savedAgent)
+                if (savedAccess.isNotBlank()) {
+                    val isExpired = TokenUtils.isExpired(savedAccess)
+
+                    if (isExpired && savedRefresh.isNotBlank()) {
+                        // Access token expired, attempt automatic silent refresh with stored refresh token
+                        repository.setCredentials(savedAccess, savedRefresh, savedAgent)
+                        addLog("Token lokal kedaluwarsa. Memperbarui sesi otomatis menggunakan refresh token...", LogLevel.INFO)
+                        val newTokens = withContext(Dispatchers.IO) {
+                            runCatching { repository.refreshAccessToken() }.getOrNull()
+                        }
+                        if (newTokens != null) {
+                            saveAuth(newTokens.accessToken, newTokens.refreshToken)
+                            _authUiState.update {
+                                it.copy(
+                                    email = savedEmail,
+                                    userAgent = savedAgent,
+                                    isLoggedIn = true,
+                                    isCheckingSavedSession = false,
+                                    userId = repository.userId(),
+                                    hasRefreshToken = true,
+                                    tokenExpiresAt = repository.tokenExpiresAt(),
+                                    message = "Sesi berhasil diperbarui otomatis dari refresh token",
+                                )
+                            }
+                            addLog("Token berhasil diperbarui otomatis untuk user ${repository.userId()}", LogLevel.SUCCESS)
+                            refreshDashboard()
+                            return@launch
+                        } else {
+                            // Refresh failed
+                            _authUiState.update {
+                                it.copy(
+                                    email = savedEmail,
+                                    userAgent = savedAgent,
+                                    isLoggedIn = false,
+                                    isCheckingSavedSession = false,
+                                    error = "Sesi telah kedaluwarsa dan refresh token tidak valid. Silakan login kembali.",
+                                )
+                            }
+                            return@launch
+                        }
+                    } else if (isExpired && savedRefresh.isBlank()) {
+                        // Expired without refresh token
+                        _authUiState.update {
+                            it.copy(
+                                email = savedEmail,
+                                userAgent = savedAgent,
+                                isLoggedIn = false,
+                                isCheckingSavedSession = false,
+                                error = "Token lokal telah kedaluwarsa. Silakan masukkan token baru atau login via OTP.",
+                            )
+                        }
+                        return@launch
+                    }
+
+                    // Token is not expired!
+                    repository.setCredentials(savedAccess, savedRefresh, savedAgent)
+                    _authUiState.update {
+                        it.copy(
+                            email = savedEmail,
+                            userAgent = savedAgent,
+                            isLoggedIn = true,
+                            isCheckingSavedSession = false,
+                            userId = repository.userId(),
+                            hasRefreshToken = savedRefresh.isNotBlank(),
+                            tokenExpiresAt = repository.tokenExpiresAt(),
+                            message = "Sesi tersimpan dimuat",
+                        )
+                    }
+                    refreshDashboard()
+                } else {
+                    _authUiState.update {
+                        it.copy(
+                            email = savedEmail,
+                            userAgent = savedAgent,
+                            isCheckingSavedSession = false,
+                            isLoggedIn = false,
+                        )
+                    }
+                }
+            } catch (e: Throwable) {
                 _authUiState.update {
                     it.copy(
-                        email = savedEmail,
-                        userAgent = savedAgent,
-                        isLoggedIn = true,
-                        userId = repository.userId(),
-                        message = "Sesi tersimpan dimuat",
+                        isCheckingSavedSession = false,
+                        isLoggedIn = false,
+                        error = "Gagal memulihkan sesi: ${e.message}",
                     )
-                }
-                refreshDashboard()
-            } else {
-                _authUiState.update {
-                    it.copy(email = savedEmail, userAgent = savedAgent)
                 }
             }
         }
@@ -182,12 +258,6 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                 message = "Titik target direset",
             )
         }
-    }
-
-    fun setBotDelay(seconds: Int) {
-        val bounded = seconds.coerceIn(3, 30)
-        store.putInt("botDelay", bounded)
-        _botUiState.update { it.copy(delayBetweenGamesSeconds = bounded) }
     }
 
     fun prepareCaptcha() {
@@ -363,6 +433,10 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun updateManualRefreshToken(value: String) {
+        _authUiState.update { it.copy(manualRefreshToken = value, error = null) }
+    }
+
     fun validateOtp() {
         val req = otpRequest
         if (req == null) {
@@ -386,6 +460,8 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                         isBusy = false,
                         isLoggedIn = true,
                         userId = repository.userId(),
+                        hasRefreshToken = tokens.refreshToken.isNotBlank(),
+                        tokenExpiresAt = repository.tokenExpiresAt(),
                         message = "Login berhasil!",
                     )
                 }
@@ -400,29 +476,61 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun directTokenLogin() {
-        val raw = _authUiState.value.manualToken.trim()
-        val token = raw.removePrefix("Bearer ").trim()
-        if (token.isBlank()) {
+        val rawAccess = _authUiState.value.manualToken.trim()
+        val access = rawAccess.removePrefix("Bearer ").trim()
+        val refresh = _authUiState.value.manualRefreshToken.trim()
+        if (access.isBlank()) {
             _authUiState.update { it.copy(error = "Masukkan Bearer token RollerCoin") }
             return
         }
-        repository.setCredentials(token, "", _authUiState.value.userAgent)
+        repository.setCredentials(access, refresh, _authUiState.value.userAgent)
         val uid = repository.userId()
         if (uid.isBlank()) {
             _authUiState.update { it.copy(error = "Format token tidak valid (JWT user_id tidak ditemukan)") }
             return
         }
-        saveAuth(token, "")
+        saveAuth(access, refresh)
         _authUiState.update {
             it.copy(
                 isLoggedIn = true,
                 userId = uid,
+                hasRefreshToken = refresh.isNotBlank(),
+                tokenExpiresAt = repository.tokenExpiresAt(),
                 message = "Berhasil masuk dengan direct token",
                 error = null,
             )
         }
         addLog("Tersambung dengan Bearer token (User ID: $uid)", LogLevel.SUCCESS)
         refreshDashboard()
+    }
+
+    fun manualRefreshSession() {
+        if (!repository.hasRefreshToken()) {
+            _authUiState.update { it.copy(error = "Refresh token tidak tersedia pada sesi ini") }
+            return
+        }
+        viewModelScope.launch {
+            _authUiState.update { it.copy(isBusy = true, error = null, message = "Memperbarui token...") }
+            try {
+                val newTokens = withContext(Dispatchers.IO) { repository.refreshAccessToken() }
+                saveAuth(newTokens.accessToken, newTokens.refreshToken)
+                _authUiState.update {
+                    it.copy(
+                        isBusy = false,
+                        hasRefreshToken = true,
+                        tokenExpiresAt = repository.tokenExpiresAt(),
+                        message = "Token berhasil diperbarui!",
+                    )
+                }
+                addLog("Token berhasil diperbarui via manual refresh", LogLevel.SUCCESS)
+                refreshDashboard()
+            } catch (e: Throwable) {
+                _authUiState.update {
+                    it.copy(isBusy = false, error = "Gagal memperbarui token: ${e.message}")
+                }
+                addLog("Gagal refresh token: ${e.message}", LogLevel.ERROR)
+            }
+        }
     }
 
     private fun saveAuth(access: String, refresh: String) {
@@ -437,11 +545,44 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _dashboardUiState.update { it.copy(isLoading = true, error = null) }
             try {
+                // Pre-check: if access token has expired and refresh token is available, refresh it first
+                if (repository.isTokenExpired() && repository.hasRefreshToken()) {
+                    addLog("Token kedaluwarsa sebelum muat dashboard. Memperbarui otomatis...", LogLevel.INFO)
+                    val newTokens = withContext(Dispatchers.IO) { repository.refreshAccessToken() }
+                    saveAuth(newTokens.accessToken, newTokens.refreshToken)
+                    _authUiState.update {
+                        it.copy(
+                            tokenExpiresAt = repository.tokenExpiresAt(),
+                            hasRefreshToken = true,
+                        )
+                    }
+                }
                 val snapshot = withContext(Dispatchers.IO) { repository.loadDashboard() }
                 _dashboardUiState.update {
                     it.copy(isLoading = false, dashboard = snapshot, error = null)
                 }
             } catch (e: Throwable) {
+                val isAuthErr = e.message?.contains("401") == true || e.message?.contains("token", ignoreCase = true) == true
+                if (isAuthErr && repository.hasRefreshToken()) {
+                    val refreshed = withContext(Dispatchers.IO) {
+                        runCatching { repository.refreshAccessToken() }.getOrNull()
+                    }
+                    if (refreshed != null) {
+                        saveAuth(refreshed.accessToken, refreshed.refreshToken)
+                        _authUiState.update {
+                            it.copy(tokenExpiresAt = repository.tokenExpiresAt())
+                        }
+                        val retrySnapshot = withContext(Dispatchers.IO) {
+                            runCatching { repository.loadDashboard() }.getOrNull()
+                        }
+                        if (retrySnapshot != null) {
+                            _dashboardUiState.update {
+                                it.copy(isLoading = false, dashboard = retrySnapshot, error = null)
+                            }
+                            return@launch
+                        }
+                    }
+                }
                 _dashboardUiState.update {
                     it.copy(isLoading = false, error = "Gagal memuat dashboard: ${e.message}")
                 }
@@ -450,211 +591,34 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private suspend fun runGameCountdown(active: ActiveGame): FinishedGame? {
-        _activeGameUiState.update {
-            it.copy(
-                activeGame = active,
-                remainingSeconds = active.totalDurationSeconds,
-                progress = 0f,
-                isSubmitting = false,
-            )
-        }
-        val total = active.totalDurationSeconds
-        val endAt = System.currentTimeMillis() + total * 1000L
-
-        while (true) {
-            val remainingMs = endAt - System.currentTimeMillis()
-            if (remainingMs <= 0) break
-            val sec = (remainingMs / 1000L).toInt() + 1
-            val elapsed = total - (remainingMs.toFloat() / 1000f)
-            val pct = (elapsed / total.toFloat()).coerceIn(0f, 1f)
-            _activeGameUiState.update {
-                it.copy(remainingSeconds = sec, progress = pct)
-            }
-            delay(500)
-        }
-
-        _activeGameUiState.update { it.copy(remainingSeconds = 0, progress = 1f, isSubmitting = true) }
-        addLog("Mengirim hasil ${active.game.definition.name}...", LogLevel.INFO)
-
-        return try {
-            val finished = withContext(Dispatchers.IO) { repository.finishGame(active) }
-            _activeGameUiState.update {
-                it.copy(activeGame = null, isSubmitting = false, lastFinished = finished)
-            }
-            addLog(
-                "✓ ${finished.gameName} SELESAI · Power: ${Formatters.hashPower(finished.actualPower)} (${finished.durationSeconds}s)",
-                LogLevel.SUCCESS,
-            )
-            refreshDashboard()
-            finished
-        } catch (e: Throwable) {
-            _activeGameUiState.update { it.copy(activeGame = null, isSubmitting = false) }
-            addLog("✗ Gagal mengirim hasil: ${e.message}", LogLevel.ERROR)
-            null
-        }
-    }
-
     fun startAutoBot() {
-        if (_botUiState.value.isAutoRunning) return
-        botJob?.cancel()
-        _botUiState.update {
-            it.copy(
-                isAutoRunning = true,
-                statusMessage = "Bot aktif · Menyiapkan putaran...",
-            )
-        }
-        addLog("▶ AUTO-PLAY BOT DIMULAI", LogLevel.SUCCESS)
-
-        botJob = viewModelScope.launch {
-            var cycle = _botUiState.value.currentCycle
-            var totalPower = _botUiState.value.totalSessionPower
-            var totalGames = _botUiState.value.totalGamesPlayed
-
-            while (_botUiState.value.isAutoRunning) {
-                cycle++
-                var cyclePower = 0
-                _botUiState.update {
-                    it.copy(
-                        currentCycle = cycle,
-                        cyclePower = 0,
-                        statusMessage = "Putaran #$cycle · Memeriksa data game...",
-                    )
-                }
-                addLog("── Putaran #$cycle Dimulai ──", LogLevel.INFO)
-
-                // Ambil daftar game terbaru
-                val gamesData: List<GameState> = try {
-                    withContext(Dispatchers.IO) { repository.fetchGamesList() }
-                } catch (e: Throwable) {
-                    addLog("Gagal mengambil data game: ${e.message}", LogLevel.WARNING)
-                    repository.disconnect()
-                    delay(15000)
-                    continue
-                }
-
-                // Cek apakah ada game yang tersedia
-                val availableGames = gamesData.filter { it.cooldownSeconds <= 0 }
-                if (availableGames.isEmpty()) {
-                    val minCooldown = gamesData.map { it.cooldownSeconds }.filter { it > 0 }.minOrNull() ?: 60
-                    addLog("Semua game dalam cooldown. Menunggu ${Formatters.cooldown(minCooldown)}...", LogLevel.WARNING)
-                    repository.disconnect()
-
-                    for (sec in minCooldown downTo 1) {
-                        if (!_botUiState.value.isAutoRunning) break
-                        _botUiState.update {
-                            it.copy(
-                                cooldownWaitSeconds = sec,
-                                statusMessage = "Cooldown semua game: ${Formatters.timeRemaining(sec)}",
-                            )
-                        }
-                        delay(1000)
-                    }
-                    _botUiState.update { it.copy(cooldownWaitSeconds = 0) }
-                    continue
-                }
-
-                // Mainkan semua game yang tidak cooldown
-                for (gameState in availableGames) {
-                    if (!_botUiState.value.isAutoRunning) break
-
-                    _botUiState.update {
-                        it.copy(statusMessage = "Memainkan #${gameState.definition.number} ${gameState.definition.name}...")
-                    }
-                    addLog("Memulai #${gameState.definition.number} ${gameState.definition.name} (Level ${gameState.level})...", LogLevel.INFO)
-
-                    val active = try {
-                        withContext(Dispatchers.IO) { repository.startGame(gameState) }
-                    } catch (e: Throwable) {
-                        addLog("Skip ${gameState.definition.name}: ${e.message}", LogLevel.WARNING)
-                        delay(2000)
-                        continue
-                    }
-
-                    val finished = runGameCountdown(active)
-                    if (finished != null) {
-                        cyclePower += finished.actualPower
-                        totalPower += finished.actualPower
-                        totalGames++
-                        _botUiState.update {
-                            it.copy(
-                                cyclePower = cyclePower,
-                                totalSessionPower = totalPower,
-                                totalGamesPlayed = totalGames,
-                            )
-                        }
-                    }
-
-                    if (!_botUiState.value.isAutoRunning) break
-
-                    val delaySec = _botUiState.value.delayBetweenGamesSeconds
-                    addLog("Jeda antar game: ${delaySec}s", LogLevel.INFO)
-                    for (d in delaySec downTo 1) {
-                        if (!_botUiState.value.isAutoRunning) break
-                        _botUiState.update {
-                            it.copy(statusMessage = "Jeda berikutnya: ${d}s")
-                        }
-                        delay(1000)
-                    }
-                }
-
-                addLog("Mengambil data cooldown terbaru dari server...", LogLevel.INFO)
-                val freshGames = try {
-                    withContext(Dispatchers.IO) { repository.fetchGamesList() }
-                } catch (error: Throwable) {
-                    addLog("Gagal memperbarui cooldown: ${error.message}", LogLevel.WARNING)
-                    emptyList()
-                }
-                val stillAvailable = freshGames.any { it.cooldownSeconds <= 0 }
-
-                addLog(
-                    "Putaran #$cycle selesai. Mined power: ${Formatters.hashPower(cyclePower)}",
-                    LogLevel.SUCCESS,
-                )
-
-                if (!stillAvailable && freshGames.isNotEmpty()) {
-                    val minCooldown = freshGames
-                        .map { it.cooldownSeconds }
-                        .filter { it > 0 }
-                        .minOrNull() ?: 60
-                    addLog(
-                        "Semua game cooldown. Menunggu ${Formatters.cooldown(minCooldown)}...",
-                        LogLevel.WARNING,
-                    )
-                    repository.disconnect()
-                    for (sec in minCooldown downTo 1) {
-                        if (!_botUiState.value.isAutoRunning) break
-                        _botUiState.update {
-                            it.copy(
-                                cooldownWaitSeconds = sec,
-                                statusMessage = "Cooldown semua game: ${Formatters.timeRemaining(sec)}",
-                            )
-                        }
-                        delay(1000)
-                    }
-                    _botUiState.update { it.copy(cooldownWaitSeconds = 0) }
-                } else {
-                    delay(1000)
-                }
-            }
+        BotEngine.startBot(getApplication(), repository) {
+            refreshDashboard()
         }
     }
 
     fun stopAutoBot() {
-        botJob?.cancel()
-        botJob = null
-        _botUiState.update {
-            it.copy(
-                isAutoRunning = false,
-                statusMessage = "IDLE - Bot dihentikan",
-                cooldownWaitSeconds = 0,
-            )
-        }
-        addLog("⏹ AUTO-PLAY BOT DIHENTIKAN", LogLevel.WARNING)
+        BotEngine.stopBot(getApplication())
+    }
+
+    fun setBotDelay(delaySeconds: Int) {
+        BotEngine.setDelay(delaySeconds, store)
     }
 
     fun clearLogs() {
-        _botUiState.update { it.copy(logs = emptyList()) }
+        BotEngine.clearLogs()
+    }
+
+    fun toggleFloatingBubble(enabled: Boolean) {
+        BotEngine.setFloatingBubbleEnabled(enabled, getApplication())
+    }
+
+    fun toggleBackgroundService(enabled: Boolean) {
+        BotEngine.setBackgroundServiceEnabled(enabled)
+    }
+
+    fun addLog(message: String, level: LogLevel = LogLevel.INFO) {
+        BotEngine.addLog(message, level)
     }
 
     fun logout() {
@@ -663,24 +627,12 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
         store.clear()
         _authUiState.value = AuthUiState()
         _dashboardUiState.value = DashboardUiState()
-        _activeGameUiState.value = ActiveGameUiState()
         addLog("Akun telah dikeluarkan", LogLevel.INFO)
     }
 
-    private fun addLog(message: String, level: LogLevel = LogLevel.INFO) {
-        val entry = BotLog(
-            timestamp = timeFormat.format(Date()),
-            message = message,
-            level = level,
-        )
-        _botUiState.update {
-            val list = (it.logs + entry).takeLast(100)
-            it.copy(logs = list)
-        }
-    }
-
     override fun onCleared() {
-        stopAutoBot()
+        // Note: we don't automatically kill the bot on ViewModel clear if background service is enabled,
+        // but if user logged out or explicitly stopped, it is stopped.
         repository.disconnect()
         super.onCleared()
     }
