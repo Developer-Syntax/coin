@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.rollercoin.mobile.CryptoTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-09-29T02:31:49.899Z" hostname="repl" time="0.091">
+  <properties/>
+  <testcase name="deriveKeyUsesDefaultSeedWhenUidHasNoDigits" classname="com.rollercoin.mobile.CryptoTest" time="0.046"/>
+  <testcase name="encryptAndDecryptRoundTrip" classname="com.rollercoin.mobile.CryptoTest" time="0.042"/>
+  <testcase name="deriveKeyMatchesPhpAlgorithmForNumericUid" classname="com.rollercoin.mobile.CryptoTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

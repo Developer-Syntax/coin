@@ -14,3 +14,17 @@ mtime_ms = 1790626725791
 storage_uri = "gcs://replit-rams-assets-sisko/rams/assets/repl:ac3913e5-bcdf-4022-8807-ac2c5c0c384c/db8eb0e4-21b1-4be3-8aa2-74a2420319ce/fac98d6d-a1ab-4ac2-be9f-bee706e38dad"
 storage_version_token = "1790626735247559"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "0wDHhnlGWlCG0Ys0UQw1X"
+uri = "file://app/build/outputs/apk/debug/app-debug.apk"
+type = "unspecified"
+title = "RollerCoin debug APK"
+description = "APK debug untuk uji coba auto-bot. Build assembleDebug berhasil dan test unit lulus. SHA-256: 70dcac300f50d1056c53256e9dd260e888b9206c66296ac412195293b759809f"
+logical_id = "edb56f6a-80ef-4d0b-a78f-9b522a9ff7fe"
+content_hash = "sha256:70dcac300f50d1056c53256e9dd260e888b9206c66296ac412195293b759809f"
+size = 18531292
+mtime_ms = 1790649112657
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:e0d49c64-7bd8-499d-acb3-907e57a22ee0/edb56f6a-80ef-4d0b-a78f-9b522a9ff7fe/b87b9ee4-6551-4832-9fe2-e5d9b05800b9"
+storage_version_token = "1790649134356283"
+content_type = "application/octet-stream"
