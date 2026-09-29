@@ -74,8 +74,23 @@ class RollerCoinBotService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_APP_FOREGROUND -> {
+                isAppInForeground = true
+                removeFloatingViews()
+            }
+            ACTION_APP_BACKGROUND -> {
+                isAppInForeground = false
+                if (BotEngine.isFloatingBubbleEnabled.value &&
+                    BotEngine.botUiState.value.isAutoRunning &&
+                    Settings.canDrawOverlays(this)
+                ) {
+                    showFloatingBall()
+                }
+            }
             ACTION_SHOW_BUBBLE -> {
-                showFloatingBall()
+                if (!isAppInForeground) {
+                    showFloatingBall()
+                }
             }
             ACTION_HIDE_BUBBLE -> {
                 removeFloatingViews()
@@ -175,8 +190,9 @@ class RollerCoinBotService : Service() {
             ) { bot, game, bubbleEnabled ->
                 Triple(bot, game, bubbleEnabled)
             }.collect { (bot, game, bubbleEnabled) ->
-                // Check if overlay permission is granted
-                if (bubbleEnabled && Settings.canDrawOverlays(this@RollerCoinBotService)) {
+                // Only show system overlay if the app is NOT in the foreground,
+                // so there is NEVER a duplicate bubble when the user is inside the app!
+                if (bubbleEnabled && bot.isAutoRunning && !isAppInForeground && Settings.canDrawOverlays(this@RollerCoinBotService)) {
                     if (floatingBallView == null) {
                         showFloatingBall()
                     }
@@ -222,13 +238,13 @@ class RollerCoinBotService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupFloatingOverlay() {
-        if (!Settings.canDrawOverlays(this)) return
+        if (!Settings.canDrawOverlays(this) || isAppInForeground) return
         showFloatingBall()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun showFloatingBall() {
-        if (!Settings.canDrawOverlays(this) || floatingBallView != null) return
+        if (!Settings.canDrawOverlays(this) || isAppInForeground || floatingBallView != null) return
 
         val wm = windowManager ?: return
         val displayMetrics = resources.displayMetrics
@@ -251,7 +267,8 @@ class RollerCoinBotService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = displayMetrics.widthPixels - ballSize - (12 * density).toInt()
+            // Initial position: docked as a half-circle on the right screen edge
+            x = displayMetrics.widthPixels - (ballSize * 0.52f).toInt()
             y = displayMetrics.heightPixels / 3
         }
         ballLayoutParams = params
@@ -268,6 +285,7 @@ class RollerCoinBotService : Service() {
             }
             background = bg
             elevation = 16f
+            alpha = 0.38f // Translucent when placed / docked
         }
 
         // Inner icon
@@ -316,6 +334,7 @@ class RollerCoinBotService : Service() {
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         isClick = true
+                        ballContainer.alpha = 1.0f // Fully visible when touched
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -324,6 +343,7 @@ class RollerCoinBotService : Service() {
                         if (abs(dx) > 10 || abs(dy) > 10) {
                             isClick = false
                         }
+                        ballContainer.alpha = 1.0f
                         currentParams.x = initialX + dx.toInt()
                         currentParams.y = initialY + dy.toInt()
                         try {
@@ -335,16 +355,18 @@ class RollerCoinBotService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isClick) {
+                            ballContainer.alpha = 1.0f
                             toggleFloatingInfoCard()
                         } else {
-                            // Snap to closest edge
+                            // Snap to closest edge, tuck half-circle into the edge, and become transparent
                             val screenWidth = displayMetrics.widthPixels
                             val targetX = if (currentParams.x + ballSize / 2 < screenWidth / 2) {
-                                (10 * density).toInt()
+                                -(ballSize * 0.48f).toInt()
                             } else {
-                                screenWidth - ballSize - (10 * density).toInt()
+                                screenWidth - (ballSize * 0.52f).toInt()
                             }
                             currentParams.x = targetX
+                            ballContainer.alpha = 0.38f // Translucent when placed
                             try {
                                 wm.updateViewLayout(ballContainer, currentParams)
                             } catch (e: Exception) {
@@ -714,6 +736,21 @@ class RollerCoinBotService : Service() {
         const val ACTION_SHOW_BUBBLE = "com.rollercoin.mobile.action.SHOW_BUBBLE"
         const val ACTION_HIDE_BUBBLE = "com.rollercoin.mobile.action.HIDE_BUBBLE"
         const val ACTION_UPDATE_STATUS = "com.rollercoin.mobile.action.UPDATE_STATUS"
+        const val ACTION_APP_FOREGROUND = "com.rollercoin.mobile.action.APP_FOREGROUND"
+        const val ACTION_APP_BACKGROUND = "com.rollercoin.mobile.action.APP_BACKGROUND"
+
+        @Volatile
+        var isAppInForeground: Boolean = false
+
+        fun setAppForeground(context: Context, inForeground: Boolean) {
+            isAppInForeground = inForeground
+            try {
+                val intent = Intent(context, RollerCoinBotService::class.java).apply {
+                    action = if (inForeground) ACTION_APP_FOREGROUND else ACTION_APP_BACKGROUND
+                }
+                context.startService(intent)
+            } catch (_: Exception) {}
+        }
 
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_TEXT = "extra_text"

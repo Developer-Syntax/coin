@@ -196,6 +196,52 @@ fun AccountScreen(
                             Icon(Icons.Default.ContentCopy, contentDescription = "Salin", tint = RcTextMuted, modifier = Modifier.size(14.dp))
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Open Profile in Browser Action
+                    Button(
+                        onClick = {
+                            val raw = profile?.publicProfileLink?.trim().orEmpty()
+                            val uid = userId.trim()
+                            val url = when {
+                                raw.startsWith("http://") || raw.startsWith("https://") -> raw
+                                raw.startsWith("/") -> "https://rollercoin.com$raw"
+                                raw.isNotBlank() -> "https://rollercoin.com/$raw"
+                                uid.isNotBlank() -> "https://rollercoin.com/p/$uid"
+                                else -> "https://rollercoin.com"
+                            }
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(intent)
+                                Toast.makeText(context, "Membuka profil di browser...", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                try {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("RollerCoin Profile Link", url))
+                                    Toast.makeText(context, "Tidak dapat membuka browser. Link disalin:\n$url", Toast.LENGTH_LONG).show()
+                                } catch (_: Exception) {
+                                    Toast.makeText(context, "Gagal membuka link: $url", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RcCyan.copy(alpha = 0.2f),
+                            contentColor = RcCyan
+                        ),
+                        border = BorderStroke(1.dp, RcCyan.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("account_open_browser_profile_button")
+                    ) {
+                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Lihat Profil di Browser", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             }
         }

@@ -40,6 +40,10 @@ import com.rollercoin.mobile.R
 import com.rollercoin.mobile.ui.theme.*
 import kotlin.math.roundToInt
 
+import androidx.compose.ui.graphics.graphicsLayer
+
+enum class BubbleDockSide { LEFT, RIGHT }
+
 @Composable
 fun FloatingGameBubble(
     botState: BotUiState,
@@ -55,18 +59,47 @@ fun FloatingGameBubble(
 
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-    val bubbleSizePx = with(density) { 58.dp.toPx() }
+    val bubbleSizeDp = 58.dp
+    val bubbleSizePx = with(density) { bubbleSizeDp.toPx() }
 
-    var offsetX by remember { mutableFloatStateOf(screenWidthPx - bubbleSizePx - 24f) }
-    var offsetY by remember { mutableFloatStateOf(screenHeightPx * 0.35f) }
+    var dockSide by remember { mutableStateOf(BubbleDockSide.RIGHT) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // Docked positions: half circle tucked into the screen border (approx. 50% protruding)
+    val dockedLeftX = -(bubbleSizePx * 0.48f)
+    val dockedRightX = screenWidthPx - (bubbleSizePx * 0.52f)
+
+    var dragPositionX by remember { mutableFloatStateOf(dockedRightX) }
+    var dragPositionY by remember { mutableFloatStateOf(screenHeightPx * 0.35f) }
     var showInfoDialog by remember { mutableStateOf(false) }
+
+    val targetX = if (isDragging) dragPositionX else {
+        if (dockSide == BubbleDockSide.LEFT) dockedLeftX else dockedRightX
+    }
+
+    // Smooth spring snap to the edge when released/placed
+    val animatedX by animateFloatAsState(
+        targetValue = targetX,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "bubbleSnapX"
+    )
+
+    // Transparent / translucent when placed (saat diletakan), 100% opaque when dragged
+    val bubbleAlpha by animateFloatAsState(
+        targetValue = if (isDragging) 1.0f else 0.38f,
+        animationSpec = tween(durationMillis = 350),
+        label = "bubbleAlpha"
+    )
 
     // Pulsing animation when a game is actively playing
     val isGameActive = activeState.activeGame != null
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isGameActive) 1.14f else 1f,
+        targetValue = if (isGameActive && isDragging) 1.10f else 1.0f,
         animationSpec = infiniteRepeatable(
             animation = tween(900, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -74,55 +107,100 @@ fun FloatingGameBubble(
         label = "bubblePulse"
     )
 
-    // Semi-transparent floating ball positioned on screen side
+    var totalDragDelta by remember { mutableFloatStateOf(0f) }
+
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                // Ensure outside clicks are not blocked except on bubble itself
-            }
+        modifier = modifier.fillMaxSize()
     ) {
         Box(
             modifier = Modifier
-                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                .size(58.dp)
+                .offset { IntOffset(animatedX.roundToInt(), dragPositionY.roundToInt()) }
+                .size(bubbleSizeDp)
                 .scale(pulseScale)
+                .graphicsLayer {
+                    alpha = bubbleAlpha
+                }
                 .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        offsetX = (offsetX + dragAmount.x).coerceIn(12f, screenWidthPx - bubbleSizePx - 12f)
-                        offsetY = (offsetY + dragAmount.y).coerceIn(80f, screenHeightPx - bubbleSizePx - 140f)
-                    }
+                    detectDragGestures(
+                        onDragStart = {
+                            totalDragDelta = 0f
+                            isDragging = true
+                            dragPositionX = animatedX
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            if (totalDragDelta < 12f) {
+                                // Tap detected -> Open info dialog
+                                showInfoDialog = true
+                            } else {
+                                val centerX = dragPositionX + (bubbleSizePx / 2f)
+                                dockSide = if (centerX < screenWidthPx / 2f) BubbleDockSide.LEFT else BubbleDockSide.RIGHT
+                            }
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            val centerX = dragPositionX + (bubbleSizePx / 2f)
+                            dockSide = if (centerX < screenWidthPx / 2f) BubbleDockSide.LEFT else BubbleDockSide.RIGHT
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            totalDragDelta += kotlin.math.hypot(dragAmount.x, dragAmount.y)
+                            dragPositionX = (dragPositionX + dragAmount.x).coerceIn(
+                                -bubbleSizePx / 2f,
+                                screenWidthPx - bubbleSizePx / 2f
+                            )
+                            dragPositionY = (dragPositionY + dragAmount.y).coerceIn(
+                                70f,
+                                screenHeightPx - bubbleSizePx - 110f
+                            )
+                        }
+                    )
                 }
                 .clip(CircleShape)
-                // Semi-transparent dark circular ball (80% opacity)
                 .background(Color(0xCC0F172A))
-                // Glowing border
                 .border(
                     BorderStroke(
                         2.dp,
                         Brush.linearGradient(
-                            if (isGameActive) listOf(RcGreen, RcCyan) else listOf(RcAmber, Color(0xFFF97316))
+                            if (isGameActive) listOf(RcGreen, RcCyan)
+                            else listOf(RcAmber, Color(0xFFF97316))
                         )
                     ),
                     CircleShape
                 )
-                .clickable { showInfoDialog = true }
+                .clickable {
+                    showInfoDialog = true
+                }
                 .testTag("floating_game_ball"),
             contentAlignment = Alignment.Center
         ) {
+            // When docked as a half-circle on the screen side, adjust the logo slightly toward the visible half
+            val logoOffset = if (!isDragging) {
+                if (dockSide == BubbleDockSide.LEFT) 8.dp else (-8).dp
+            } else 0.dp
+
             Image(
                 painter = painterResource(id = R.drawable.ic_rollercoin_logo),
                 contentDescription = "RollerCoin Floating Ball",
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier
+                    .size(32.dp)
+                    .offset(x = logoOffset)
             )
 
-            // Status indicator dot
+            // Status indicator dot (positioned on the exposed semicircle side)
+            val indicatorAlignment = if (!isDragging && dockSide == BubbleDockSide.LEFT) {
+                Alignment.CenterEnd
+            } else if (!isDragging && dockSide == BubbleDockSide.RIGHT) {
+                Alignment.CenterStart
+            } else {
+                Alignment.TopEnd
+            }
+
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(12.dp)
+                    .align(indicatorAlignment)
+                    .padding(3.dp)
+                    .size(11.dp)
                     .clip(CircleShape)
                     .background(if (isGameActive) RcGreen else RcAmber)
                     .border(1.5.dp, Color.Black, CircleShape)

@@ -249,18 +249,31 @@ class RollerCoinRepository(
 
     fun profile(): Profile {
         val data = successData(call("GET", "$ROLLERCOIN/api/profile/user-profile-data"), "profile")
-        return Profile(
-            name = data.optString("name", "N/A"),
-            email = data.optString("email", "N/A"),
-            id = data.optString("id", uid),
-            active = !data.optBoolean("is_banned", false),
-            premium = if (data.has("is_premium")) data.optBoolean("is_premium") else null,
-            miners = if (data.has("user_miners_amount")) data.optInt("user_miners_amount") else null,
-            racks = data.optInt("user_racks_amount", data.optInt("racks_amount", 0)).takeIf { it > 0 },
-            maxPower = data.optInt("max_total_power", 0).takeIf { it > 0 },
-            leagueId = data.optJSONArray("leagues_ids")?.optString(0, "N/A") ?: data.optString("league", "N/A"),
-            registration = data.optString("registration", data.optString("created_at", "N/A")),
-            publicProfileLink = data.optString("public_profile_link", "$ROLLERCOIN/p/$uid"),
+            val rawLink = data.optString("public_profile_link").ifBlank {
+                data.optString("profile_url").ifBlank {
+                    data.optString("profile_link")
+                }
+            }
+            val resolvedProfileLink = when {
+                rawLink.startsWith("http://") || rawLink.startsWith("https://") -> rawLink
+                rawLink.startsWith("/") -> "$ROLLERCOIN$rawLink"
+                rawLink.isNotBlank() -> "$ROLLERCOIN/$rawLink"
+                uid.isNotBlank() -> "$ROLLERCOIN/p/$uid"
+                else -> "$ROLLERCOIN"
+            }
+
+            return Profile(
+                name = data.optString("name", "N/A"),
+                email = data.optString("email", "N/A"),
+                id = data.optString("id", uid),
+                active = !data.optBoolean("is_banned", false),
+                premium = if (data.has("is_premium")) data.optBoolean("is_premium") else null,
+                miners = if (data.has("user_miners_amount")) data.optInt("user_miners_amount") else null,
+                racks = data.optInt("user_racks_amount", data.optInt("racks_amount", 0)).takeIf { it > 0 },
+                maxPower = data.optInt("max_total_power", 0).takeIf { it > 0 },
+                leagueId = data.optJSONArray("leagues_ids")?.optString(0, "N/A") ?: data.optString("league", "N/A"),
+                registration = data.optString("registration", data.optString("created_at", "N/A")),
+                publicProfileLink = resolvedProfileLink,
             avatarUrl = data.optString("avatar", data.optString("avatar_url", "")),
             rank = data.optLong("rank", data.optLong("place", 0L)).takeIf { it > 0L },
             bonusPowerPercent = data.optDouble("bonus_power", data.optDouble("bonus_percent", 0.0)).takeIf { it > 0.0 },

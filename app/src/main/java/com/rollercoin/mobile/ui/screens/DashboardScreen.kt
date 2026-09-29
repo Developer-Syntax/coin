@@ -324,7 +324,8 @@ fun DashboardScreen(
                     }
 
                     // Registration & League details
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // Registration & League details + Browser Profile Action
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -336,22 +337,45 @@ fun DashboardScreen(
                             color = RcTextMuted
                         )
 
-                        if (!profile?.publicProfileLink.isNullOrBlank()) {
-                            TextButton(
-                                onClick = {
-                                    runCatching {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(profile?.publicProfileLink))
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Buka Profil Web", fontSize = 11.sp, color = RcCyan)
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(Icons.Default.OpenInNew, contentDescription = null, tint = RcCyan, modifier = Modifier.size(12.dp))
+                        Button(
+                            onClick = {
+                                val raw = profile?.publicProfileLink?.trim().orEmpty()
+                                val uid = (profile?.id ?: authState.userId).trim()
+                                val url = when {
+                                    raw.startsWith("http://") || raw.startsWith("https://") -> raw
+                                    raw.startsWith("/") -> "https://rollercoin.com$raw"
+                                    raw.isNotBlank() -> "https://rollercoin.com/$raw"
+                                    uid.isNotBlank() -> "https://rollercoin.com/p/$uid"
+                                    else -> "https://rollercoin.com"
                                 }
-                            }
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                    Toast.makeText(context, "Membuka profil di browser...", Toast.LENGTH_SHORT).show()
+                                } catch (e: Exception) {
+                                    try {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(ClipData.newPlainText("RollerCoin Profile Link", url))
+                                        Toast.makeText(context, "Tidak dapat membuka browser. Link disalin ke clipboard:\n$url", Toast.LENGTH_LONG).show()
+                                    } catch (_: Exception) {
+                                        Toast.makeText(context, "Gagal membuka link: $url", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = RcCyan.copy(alpha = 0.2f),
+                                contentColor = RcCyan
+                            ),
+                            border = BorderStroke(1.dp, RcCyan.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("open_profile_browser_button")
+                        ) {
+                            Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Lihat Profil di Browser", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

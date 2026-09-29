@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.rollercoin.mobile.service.RollerCoinBotService
 import com.rollercoin.mobile.ui.components.ActiveGameOverlayBanner
 import com.rollercoin.mobile.ui.components.FloatingGameBubble
 import com.rollercoin.mobile.ui.screens.AccountScreen
@@ -47,6 +48,19 @@ enum class Screen(val label: String, val icon: ImageVector, val tag: String) {
 
 class MainActivity : ComponentActivity() {
     private val viewModel: RollerCoinViewModel by viewModels()
+
+    override fun onStart() {
+        super.onStart()
+        // Inform background service that the app is in the foreground
+        // so the service will remove any duplicate overlay window
+        RollerCoinBotService.setAppForeground(this, true)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Inform background service that the app is minimized
+        RollerCoinBotService.setAppForeground(this, false)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
