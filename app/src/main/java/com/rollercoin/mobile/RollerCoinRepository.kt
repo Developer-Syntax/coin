@@ -293,7 +293,14 @@ class RollerCoinRepository(
 
     fun fetchGamesList(): List<GameState> {
         requireAuthenticated()
-        return ensureSocket().games()
+        return try {
+            ensureSocket().games()
+        } catch (error: Throwable) {
+            // A timeout or server-side socket error must not be reused by the
+            // next bot cycle. ensureSocket() will create a fresh connection.
+            disconnect()
+            throw error
+        }
     }
 
     fun fetchPowerInfo(): PowerInfo? {
@@ -303,14 +310,10 @@ class RollerCoinRepository(
 
     fun startGame(state: GameState): ActiveGame {
         requireAuthenticated()
-        val captchaStatus = call(
-            "GET",
-            "$ROLLERCOIN/api/game/captcha-status/$uid",
-        )
-        if (captchaStatus.json?.optJSONObject("data")?.optBoolean("is_captcha_required") == true) {
-            throw ApiException("Game CAPTCHA diperlukan di akun RollerCoin")
-        }
-        val token = encodeStartGame(state.definition.number, "")
+        // The PHP bot solves the game CAPTCHA before encoding the start
+        // payload. RollerCoin expects the returned coordinates in `seccode`.
+        val seccode = solveGameCaptcha()
+        val token = encodeStartGame(state.definition.number, seccode)
         val start = ensureSocket().sendAndWait(
             JSONObject().put("cmd", "game_start_request").put("cmdval", token),
             "game_start_response",
@@ -392,6 +395,61 @@ class RollerCoinRepository(
         )
         return result.json?.optString("data").orEmpty()
             .ifBlank { throw ApiException("encode-data tidak menghasilkan token") }
+    }
+
+    /**
+     * Mirrors bot.php::checkGameCaptcha() + CaptchaSolver::solve().
+     *
+     * A game CAPTCHA is different from the login CAPTCHA only in the status
+     * endpoint. The challenge creation, image analysis and validation use the
+     * same captcha service and the resulting coordinate string is passed to
+     * encode-start-game-data as `seccode`.
+     */
+    private fun solveGameCaptcha(): String {
+        var lastFailure: String? = null
+
+        repeat(5) {
+            try {
+                val status = call(
+                    "GET",
+                    "$ROLLERCOIN/api/game/captcha-status/$uid",
+                )
+                val data = status.json?.optJSONObject("data")
+                    ?: throw ApiException("Game CAPTCHA: respons status tidak valid")
+
+                if (!data.optBoolean("is_captcha_required", false)) {
+                    return ""
+                }
+
+                val challenge = data.optString("challenge").ifBlank {
+                    throw ApiException("Game CAPTCHA: challenge kosong")
+                }
+                val maxDots = data.optInt("max_dots", 3).coerceAtLeast(1)
+                val captcha = createCaptcha(challenge, maxDots)
+                val image = captcha.image
+                    ?: throw ApiException("Game CAPTCHA: gambar challenge kosong")
+                val target = captcha.targetImage
+                    ?: throw ApiException("Game CAPTCHA: gambar target kosong")
+
+                val points = CaptchaAnalyzer.analyze(image, target, captcha.maxDots)
+                val pointString = points.joinToString(",") { (x, y) -> "$x,$y" }
+                if (pointString.isBlank()) {
+                    throw ApiException("Game CAPTCHA: titik target tidak terdeteksi")
+                }
+
+                if (validateCaptcha(challenge, pointString)) {
+                    return pointString
+                }
+                lastFailure = "jawaban CAPTCHA ditolak"
+            } catch (error: ApiException) {
+                lastFailure = error.message
+            }
+        }
+
+        throw ApiException(
+            "Game CAPTCHA gagal setelah 5 percobaan" +
+                (lastFailure?.let { ": $it" } ?: ""),
+        )
     }
 
     private fun ensureSocket(): RollerCoinSocket {
@@ -554,7 +612,11 @@ private class RollerCoinSocket(
 
     fun sendAndWait(command: JSONObject, expected: String, timeoutSeconds: Int): JSONObject? {
         val current = socket ?: throw ApiException("WebSocket belum terhubung")
-        if (!current.send(command.toString())) throw ApiException("Gagal mengirim perintah WebSocket")
+        if (!current.send(command.toString())) {
+            failure = "Gagal mengirim perintah WebSocket"
+            current.close(1001, "send_failed")
+            throw ApiException(failure ?: "Gagal mengirim perintah WebSocket")
+        }
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds.toLong())
         while (System.nanoTime() < deadline) {
             val remaining = deadline - System.nanoTime()
@@ -576,6 +638,8 @@ private class RollerCoinSocket(
                 )
             }
         }
+        failure = "Timeout menunggu $expected"
+        current.close(1001, "response_timeout")
         return null
     }
 

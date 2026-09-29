@@ -528,6 +528,7 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                     withContext(Dispatchers.IO) { repository.fetchGamesList() }
                 } catch (e: Throwable) {
                     addLog("Gagal mengambil data game: ${e.message}", LogLevel.WARNING)
+                    repository.disconnect()
                     delay(15000)
                     continue
                 }
@@ -537,6 +538,7 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                 if (availableGames.isEmpty()) {
                     val minCooldown = gamesData.map { it.cooldownSeconds }.filter { it > 0 }.minOrNull() ?: 60
                     addLog("Semua game dalam cooldown. Menunggu ${Formatters.cooldown(minCooldown)}...", LogLevel.WARNING)
+                    repository.disconnect()
 
                     for (sec in minCooldown downTo 1) {
                         if (!_botUiState.value.isAutoRunning) break
@@ -596,8 +598,44 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 }
 
-                addLog("Putaran #$cycle selesai. Mined power: ${Formatters.hashPower(cyclePower)}", LogLevel.SUCCESS)
-                delay(3000)
+                addLog("Mengambil data cooldown terbaru dari server...", LogLevel.INFO)
+                val freshGames = try {
+                    withContext(Dispatchers.IO) { repository.fetchGamesList() }
+                } catch (error: Throwable) {
+                    addLog("Gagal memperbarui cooldown: ${error.message}", LogLevel.WARNING)
+                    emptyList()
+                }
+                val stillAvailable = freshGames.any { it.cooldownSeconds <= 0 }
+
+                addLog(
+                    "Putaran #$cycle selesai. Mined power: ${Formatters.hashPower(cyclePower)}",
+                    LogLevel.SUCCESS,
+                )
+
+                if (!stillAvailable && freshGames.isNotEmpty()) {
+                    val minCooldown = freshGames
+                        .map { it.cooldownSeconds }
+                        .filter { it > 0 }
+                        .minOrNull() ?: 60
+                    addLog(
+                        "Semua game cooldown. Menunggu ${Formatters.cooldown(minCooldown)}...",
+                        LogLevel.WARNING,
+                    )
+                    repository.disconnect()
+                    for (sec in minCooldown downTo 1) {
+                        if (!_botUiState.value.isAutoRunning) break
+                        _botUiState.update {
+                            it.copy(
+                                cooldownWaitSeconds = sec,
+                                statusMessage = "Cooldown semua game: ${Formatters.timeRemaining(sec)}",
+                            )
+                        }
+                        delay(1000)
+                    }
+                    _botUiState.update { it.copy(cooldownWaitSeconds = 0) }
+                } else {
+                    delay(1000)
+                }
             }
         }
     }
