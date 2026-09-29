@@ -1,0 +1,6 @@
+{
+  "name": "RollerCoin",
+  "description": "Android client and automation dashboard for RollerCoin mini-games, mining power, and profile tracking",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

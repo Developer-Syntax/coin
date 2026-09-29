@@ -1,0 +1,1 @@
+# RollerCoin Mobile Proguard Rules
