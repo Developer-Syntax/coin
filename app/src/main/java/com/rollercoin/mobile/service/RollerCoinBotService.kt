@@ -76,7 +76,14 @@ class RollerCoinBotService : Service() {
             }
             ACTION_APP_FOREGROUND -> {
                 isAppInForeground = true
-                removeFloatingViews()
+                if (BotEngine.isFloatingBubbleEnabled.value &&
+                    BotEngine.botUiState.value.isAutoRunning &&
+                    Settings.canDrawOverlays(this)
+                ) {
+                    if (floatingBallView == null) {
+                        showFloatingBall()
+                    }
+                }
             }
             ACTION_APP_BACKGROUND -> {
                 isAppInForeground = false
@@ -84,13 +91,13 @@ class RollerCoinBotService : Service() {
                     BotEngine.botUiState.value.isAutoRunning &&
                     Settings.canDrawOverlays(this)
                 ) {
-                    showFloatingBall()
+                    if (floatingBallView == null) {
+                        showFloatingBall()
+                    }
                 }
             }
             ACTION_SHOW_BUBBLE -> {
-                if (!isAppInForeground) {
-                    showFloatingBall()
-                }
+                showFloatingBall()
             }
             ACTION_HIDE_BUBBLE -> {
                 removeFloatingViews()
@@ -190,9 +197,8 @@ class RollerCoinBotService : Service() {
             ) { bot, game, bubbleEnabled ->
                 Triple(bot, game, bubbleEnabled)
             }.collect { (bot, game, bubbleEnabled) ->
-                // Only show system overlay if the app is NOT in the foreground,
-                // so there is NEVER a duplicate bubble when the user is inside the app!
-                if (bubbleEnabled && bot.isAutoRunning && !isAppInForeground && Settings.canDrawOverlays(this@RollerCoinBotService)) {
+                // Show system overlay whenever bubble is enabled, bot is running, and overlay permission is granted
+                if (bubbleEnabled && bot.isAutoRunning && Settings.canDrawOverlays(this@RollerCoinBotService)) {
                     if (floatingBallView == null) {
                         showFloatingBall()
                     }
@@ -238,13 +244,13 @@ class RollerCoinBotService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupFloatingOverlay() {
-        if (!Settings.canDrawOverlays(this) || isAppInForeground) return
+        if (!Settings.canDrawOverlays(this)) return
         showFloatingBall()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun showFloatingBall() {
-        if (!Settings.canDrawOverlays(this) || isAppInForeground || floatingBallView != null) return
+        if (!Settings.canDrawOverlays(this) || floatingBallView != null) return
 
         val wm = windowManager ?: return
         val displayMetrics = resources.displayMetrics

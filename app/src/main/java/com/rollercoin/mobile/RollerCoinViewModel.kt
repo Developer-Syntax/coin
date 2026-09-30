@@ -38,7 +38,7 @@ data class AuthUiState(
     val captchaPointList: List<CaptchaPoint> = emptyList(),
     val otpRequested: Boolean = false,
     val isBusy: Boolean = false,
-    val isCheckingSavedSession: Boolean = true,
+    val isCheckingSavedSession: Boolean = false,
     val isLoggedIn: Boolean = false,
     val userId: String = "",
     val hasRefreshToken: Boolean = false,
@@ -126,7 +126,6 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun restoreSavedState() {
         viewModelScope.launch {
-            _authUiState.update { it.copy(isCheckingSavedSession = true) }
             try {
                 val savedEmail = store.get("email")
                 val savedAgent = store.get("userAgent").ifBlank { DEFAULT_USER_AGENT }
@@ -146,76 +145,10 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
 
                 BotEngine.initialize(savedDelay)
 
-                if (savedAccess.isNotBlank()) {
-                    val isExpired = TokenUtils.isExpired(savedAccess)
-
-                    if (isExpired && savedRefresh.isNotBlank()) {
-                        // Access token expired, attempt automatic silent refresh with stored refresh token
-                        repository.setCredentials(savedAccess, savedRefresh, savedAgent)
-                        addLog("Token lokal kedaluwarsa. Memperbarui sesi otomatis menggunakan refresh token...", LogLevel.INFO)
-                        val newTokens = withContext(Dispatchers.IO) {
-                            runCatching { repository.refreshAccessToken() }.getOrNull()
-                        }
-                        if (newTokens != null) {
-                            saveAuth(newTokens.accessToken, newTokens.refreshToken)
-                            _authUiState.update {
-                                it.copy(
-                                    email = savedEmail,
-                                    userAgent = savedAgent,
-                                    isLoggedIn = true,
-                                    isCheckingSavedSession = false,
-                                    userId = repository.userId(),
-                                    hasRefreshToken = true,
-                                    tokenExpiresAt = repository.tokenExpiresAt(),
-                                    message = "Sesi berhasil diperbarui otomatis dari refresh token",
-                                )
-                            }
-                            addLog("Token berhasil diperbarui otomatis untuk user ${repository.userId()}", LogLevel.SUCCESS)
-                            refreshDashboard()
-                            return@launch
-                        } else {
-                            // Refresh failed
-                            _authUiState.update {
-                                it.copy(
-                                    email = savedEmail,
-                                    userAgent = savedAgent,
-                                    isLoggedIn = false,
-                                    isCheckingSavedSession = false,
-                                    error = "Sesi telah kedaluwarsa dan refresh token tidak valid. Silakan login kembali.",
-                                )
-                            }
-                            return@launch
-                        }
-                    } else if (isExpired && savedRefresh.isBlank()) {
-                        // Expired without refresh token
-                        _authUiState.update {
-                            it.copy(
-                                email = savedEmail,
-                                userAgent = savedAgent,
-                                isLoggedIn = false,
-                                isCheckingSavedSession = false,
-                                error = "Token lokal telah kedaluwarsa. Silakan masukkan token baru atau login via OTP.",
-                            )
-                        }
-                        return@launch
-                    }
-
-                    // Token is not expired!
-                    repository.setCredentials(savedAccess, savedRefresh, savedAgent)
-                    _authUiState.update {
-                        it.copy(
-                            email = savedEmail,
-                            userAgent = savedAgent,
-                            isLoggedIn = true,
-                            isCheckingSavedSession = false,
-                            userId = repository.userId(),
-                            hasRefreshToken = savedRefresh.isNotBlank(),
-                            tokenExpiresAt = repository.tokenExpiresAt(),
-                            message = "Sesi tersimpan dimuat",
-                        )
-                    }
-                    refreshDashboard()
-                } else {
+                // Validasi lokal dilakukan hanya ketika ada token dan refresh token yang tersimpan
+                val hasTokens = savedAccess.isNotBlank() && savedRefresh.isNotBlank()
+                if (!hasTokens) {
+                    // Jika tidak ada token atau refresh token, jangan validasi lokal, pengguna langsung di layar login
                     _authUiState.update {
                         it.copy(
                             email = savedEmail,
@@ -224,17 +157,134 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                             isLoggedIn = false,
                         )
                     }
+                    return@launch
                 }
-            } catch (e: Throwable) {
+
+                // Tampilkan indikator pemeriksaan sesi lokal karena ada token yang perlu divalidasi
                 _authUiState.update {
                     it.copy(
-                        isCheckingSavedSession = false,
-                        isLoggedIn = false,
-                        error = "Gagal memulihkan sesi: ${e.message}",
+                        email = savedEmail,
+                        userAgent = savedAgent,
+                        isCheckingSavedSession = true,
+                        error = null,
                     )
                 }
+
+                repository.setCredentials(savedAccess, savedRefresh, savedAgent)
+                var currentAccess = savedAccess
+                var currentRefresh = savedRefresh
+
+                // 1. Jika token lokal sudah expired, gunakan refresh token untuk memperbarui
+                val isExpired = repository.isTokenExpired()
+                if (isExpired) {
+                    addLog("Token lokal kedaluwarsa. Memperbarui sesi otomatis menggunakan refresh token...", LogLevel.INFO)
+                    val newTokens = withContext(Dispatchers.IO) {
+                        runCatching { repository.refreshAccessToken() }.getOrNull()
+                    }
+                    if (newTokens != null) {
+                        currentAccess = newTokens.accessToken
+                        currentRefresh = newTokens.refreshToken
+                        saveAuth(currentAccess, currentRefresh)
+                        repository.setCredentials(currentAccess, currentRefresh, savedAgent)
+                        addLog("Token berhasil diperbarui otomatis untuk user ${repository.userId()}", LogLevel.SUCCESS)
+                    } else {
+                        // Refresh token gagal -> sesi tidak valid, pengguna harus login ulang
+                        invalidateSessionAndRequireLogin("Sesi telah kedaluwarsa dan refresh token tidak valid. Silakan login kembali.")
+                        return@launch
+                    }
+                }
+
+                // 2. Validasi sesi aktif ke server RollerCoin
+                val isSessionValid = withContext(Dispatchers.IO) {
+                    runCatching { repository.profile() }.isSuccess
+                }
+
+                if (isSessionValid) {
+                    // Sesi valid! Pengguna masuk ke aplikasi
+                    _authUiState.update {
+                        it.copy(
+                            email = savedEmail,
+                            userAgent = savedAgent,
+                            isLoggedIn = true,
+                            isCheckingSavedSession = false,
+                            userId = repository.userId(),
+                            hasRefreshToken = true,
+                            tokenExpiresAt = repository.tokenExpiresAt(),
+                            message = "Sesi valid",
+                            error = null,
+                        )
+                    }
+                    addLog("Sesi lokal valid untuk user ${repository.userId()}. Masuk ke dashboard.", LogLevel.SUCCESS)
+                    refreshDashboard()
+                } else {
+                    // Validasi profil gagal; coba refreshAccessToken sekali lagi jika belum
+                    var recovered = false
+                    if (!isExpired && currentRefresh.isNotBlank()) {
+                        addLog("Verifikasi sesi gagal. Mencoba memperbarui via refresh token...", LogLevel.INFO)
+                        val refreshed = withContext(Dispatchers.IO) {
+                            runCatching { repository.refreshAccessToken() }.getOrNull()
+                        }
+                        if (refreshed != null) {
+                            currentAccess = refreshed.accessToken
+                            currentRefresh = refreshed.refreshToken
+                            saveAuth(currentAccess, currentRefresh)
+                            repository.setCredentials(currentAccess, currentRefresh, savedAgent)
+                            val retryValid = withContext(Dispatchers.IO) {
+                                runCatching { repository.profile() }.isSuccess
+                            }
+                            if (retryValid) {
+                                recovered = true
+                                _authUiState.update {
+                                    it.copy(
+                                        email = savedEmail,
+                                        userAgent = savedAgent,
+                                        isLoggedIn = true,
+                                        isCheckingSavedSession = false,
+                                        userId = repository.userId(),
+                                        hasRefreshToken = true,
+                                        tokenExpiresAt = repository.tokenExpiresAt(),
+                                        message = "Sesi diperbarui & valid",
+                                        error = null,
+                                    )
+                                }
+                                addLog("Sesi berhasil diperbarui dan divalidasi.", LogLevel.SUCCESS)
+                                refreshDashboard()
+                            }
+                        }
+                    }
+
+                    if (!recovered) {
+                        // Sesi tidak valid -> hapus sesi dan arahkan pengguna untuk login ulang
+                        invalidateSessionAndRequireLogin("Sesi lokal tidak valid atau telah kedaluwarsa. Silakan login kembali.")
+                    }
+                }
+            } catch (e: Throwable) {
+                invalidateSessionAndRequireLogin("Gagal memvalidasi sesi lokal: ${e.message}. Silakan login kembali.")
             }
         }
+    }
+
+    private fun invalidateSessionAndRequireLogin(errorMessage: String) {
+        store.remove("access")
+        store.remove("refresh")
+        repository.disconnect()
+        _authUiState.update {
+            it.copy(
+                isLoggedIn = false,
+                isCheckingSavedSession = false,
+                hasRefreshToken = false,
+                userId = "",
+                error = errorMessage,
+            )
+        }
+        _dashboardUiState.update {
+            it.copy(
+                isLoading = false,
+                dashboard = null,
+                error = null,
+            )
+        }
+        addLog(errorMessage, LogLevel.WARNING)
     }
 
     fun updateEmail(value: String) {
@@ -635,6 +685,10 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
                         }
                     }
                 }
+                if (isAuthErr) {
+                    invalidateSessionAndRequireLogin("Sesi login telah kedaluwarsa. Silakan login kembali.")
+                    return@launch
+                }
                 _dashboardUiState.update {
                     it.copy(isLoading = false, error = "Gagal memuat dashboard: ${e.message}")
                 }
@@ -809,7 +863,10 @@ class RollerCoinViewModel(application: Application) : AndroidViewModel(applicati
         powerPollingJob = null
         repository.disconnect()
         store.clear()
-        _authUiState.value = AuthUiState()
+        _authUiState.value = AuthUiState(
+            isCheckingSavedSession = false,
+            isLoggedIn = false
+        )
         _dashboardUiState.value = DashboardUiState()
         addLog("Akun telah dikeluarkan", LogLevel.INFO)
     }

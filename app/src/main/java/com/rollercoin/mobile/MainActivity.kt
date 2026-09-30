@@ -2,6 +2,7 @@ package com.rollercoin.mobile
 
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -212,8 +213,9 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // In-App Semi-Transparent Floating Ball on screen side
-                        if (isFloatingBubbleEnabled && botState.isAutoRunning) {
+                        // In-App Semi-Transparent Floating Ball on screen side as fallback ONLY when system overlay permission is not granted
+                        val hasOverlayPermission = Settings.canDrawOverlays(this@MainActivity)
+                        if (isFloatingBubbleEnabled && botState.isAutoRunning && !hasOverlayPermission) {
                             FloatingGameBubble(
                                 botState = botState,
                                 activeState = activeGameState,
